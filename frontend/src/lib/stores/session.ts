@@ -1,10 +1,59 @@
-import { writable } from 'svelte/store';
+import { writable, derived, type Writable } from 'svelte/store';
+import { browser } from '$app/environment';
+
+export interface UsuarioSession {
+	id: number;
+	nombre: string;
+}
 
 export interface UserSession {
-	session_id: string;
-	user_id: number;
-	nombre: string;
+	token: string;
+	usuario: UsuarioSession;
 	expires_at: string;
 }
 
-export const sessionStore = writable<UserSession | null>(null);
+const STORAGE_KEY = 'asg_session';
+
+function readStoredSession(): UserSession | null {
+	if (!browser) return null;
+	const raw = localStorage.getItem(STORAGE_KEY);
+	if (!raw) return null;
+	try {
+		return JSON.parse(raw) as UserSession;
+	} catch {
+		localStorage.removeItem(STORAGE_KEY);
+		return null;
+	}
+}
+
+function createSessionStore(): Writable<UserSession | null> {
+	const store = writable<UserSession | null>(readStoredSession());
+
+	if (browser) {
+		store.subscribe((value) => {
+			if (value) {
+				localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
+			} else {
+				localStorage.removeItem(STORAGE_KEY);
+			}
+		});
+	}
+
+	return store;
+}
+
+export const sessionStore = createSessionStore();
+
+export function setSession(
+	token: string,
+	usuario: UsuarioSession,
+	expires_at: string
+): void {
+	sessionStore.set({ token, usuario, expires_at });
+}
+
+export function clearSession(): void {
+	sessionStore.set(null);
+}
+
+export const isAuthenticated = derived(sessionStore, ($session) => !!$session);

@@ -7,7 +7,7 @@
 	<p>Escáner de productos Accesaniga</p>
 
 	{#if $sessionStore}
-		<p>Hola, {$sessionStore.nombre}</p>
+		<p>Hola, {$sessionStore.usuario.nombre}</p>
 	{:else}
 		<p>Inicie sesión para continuar</p>
 	{/if}

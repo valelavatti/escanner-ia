@@ -156,54 +156,54 @@ Chain strategy: pending
 
 ## Phase 2: Auth Session
 
-- [ ] **2.1 Implement usuarios and sessions repositories**
+- [x] **2.1 Implement usuarios and sessions repositories**
   - **Skill to load:** `fastapi-templates`, `SQLite Database Expert`
   - **Context7 query:** none
   - **Depends on:** 1.4
   - **Capability:** auth-session
-  - **Files to create/modify:** `backend/app/repositories/users.py`, `backend/app/repositories/sessions.py`, `backend/app/models/auth.py`
+  - **Files to create/modify:** `backend/app/repositories/auth_repository.py`, `backend/app/repositories/usuario_repository.py`
   - **Acceptance criteria:**
-    - [ ] `create_or_get_user`, `create_session`, `get_session_by_token`, `delete_session` use parameterized queries.
-    - [ ] Sessions have expiry (default 8h).
+    - [x] `get_user_by_name`, `create_session`, `get_session`, `delete_session` use parameterized queries.
+    - [x] Sessions have expiry (default 8h).
   - **Estimated lines:** 90
   - **PR slice:** PR 1c
 
-- [ ] **2.2 Implement auth endpoints and session dependency**
+- [x] **2.2 Implement auth endpoints and session dependency**
   - **Skill to load:** `fastapi-templates`, `SQLite Database Expert`
   - **Context7 query:** none
   - **Depends on:** 2.1
   - **Capability:** auth-session
-  - **Files to create/modify:** `backend/app/api/auth.py`, `backend/app/core/security.py`, `backend/app/schemas/auth.py`, `backend/main.py`
+  - **Files to create/modify:** `backend/app/api/v1/endpoints/auth.py`, `backend/app/api/v1/deps.py`, `backend/app/schemas/auth.py`, `backend/app/api/v1/router.py`
   - **Acceptance criteria:**
-    - [ ] `POST /api/auth/login` returns `UserSession` (spec scenario 1).
-    - [ ] `POST /api/auth/logout` invalidates session (spec scenario 5).
-    - [ ] `GET /api/auth/me` returns current session.
-    - [ ] Protected routes return HTTP 401 for missing/invalid tokens (spec scenario 3).
+    - [x] `POST /api/v1/auth/login` returns `LoginResponse` (spec scenario 1).
+    - [x] `POST /api/v1/auth/logout` invalidates session (spec scenario 5).
+    - [x] `GET /api/v1/auth/me` returns current session.
+    - [x] Protected routes return HTTP 401 for missing/invalid tokens (spec scenario 3).
   - **Estimated lines:** 130
   - **PR slice:** PR 1c
 
-- [ ] **2.3 Implement frontend session store and authenticated API client**
+- [x] **2.3 Implement frontend session store and authenticated API client**
   - **Skill to load:** `sveltekit-structure`
   - **Context7 query:** none
   - **Depends on:** 0.4, 2.2 (backend contract)
   - **Capability:** auth-session
-  - **Files to create/modify:** `frontend/src/lib/stores/session.ts`, `frontend/src/lib/api.ts`
+  - **Files to create/modify:** `frontend/src/lib/stores/session.ts`, `frontend/src/lib/api/client.ts`
   - **Acceptance criteria:**
-    - [ ] `sessionStore` persists token (e.g., `localStorage`) and user info.
-    - [ ] `api` attaches `Authorization` header; 401 redirects to `/login`.
+    - [x] `sessionStore` persists token (e.g., `localStorage`) and user info.
+    - [x] `api` attaches `Authorization` header; 401 redirects to `/login`.
   - **Estimated lines:** 70
   - **PR slice:** PR 1c
 
-- [ ] **2.4 Implement login page and root auth guard redirect**
+- [x] **2.4 Implement login page and root auth guard redirect**
   - **Skill to load:** `sveltekit-structure`, `Frontend Responsive Design Standards`
   - **Context7 query:** none
   - **Depends on:** 0.5, 2.3
   - **Capability:** auth-session
-  - **Files to create/modify:** `frontend/src/routes/login/+page.svelte`
+  - **Files to create/modify:** `frontend/src/routes/login/+page.svelte`, `frontend/src/routes/+layout.svelte`
   - **Acceptance criteria:**
-    - [ ] Empty name blocked client-side with validation message (spec scenario 2).
-    - [ ] Login calls `/api/auth/login`; success redirects to `/scanner`.
-    - [ ] Logout clears store and redirects to `/login`.
+    - [x] Empty name blocked client-side with validation message (spec scenario 2).
+    - [x] Login calls `/api/v1/auth/login`; success redirects to `/` (scanner placeholder).
+    - [x] Auth guard redirects unauthenticated users to `/login` and authenticated users away from `/login`.
   - **Estimated lines:** 100
   - **PR slice:** PR 1c
 

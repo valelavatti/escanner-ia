@@ -19,6 +19,7 @@ async def configure_connection(connection: aiosqlite.Connection) -> None:
 async def get_db_connection(db_path: str) -> aiosqlite.Connection:
     """Open and configure a new SQLite connection."""
     connection = await aiosqlite.connect(db_path, check_same_thread=False)
+    connection.row_factory = aiosqlite.Row
     await configure_connection(connection)
     return connection
 
@@ -27,5 +28,6 @@ async def get_db():
     """FastAPI dependency that yields a configured SQLite connection."""
     settings = get_settings()
     async with aiosqlite.connect(settings.db_path, check_same_thread=False) as connection:
+        connection.row_factory = aiosqlite.Row
         await configure_connection(connection)
         yield connection
