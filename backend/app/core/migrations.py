@@ -16,6 +16,7 @@ MIGRATIONS: list[tuple[int, str, str]] = [
     (1, "create_tables", _load_migration("001_create_tables.sql")),
     (2, "create_indexes", _load_migration("002_create_indexes.sql")),
     (3, "seed_users", _load_migration("003_seed_users.sql")),
+    (4, "seed_suelto_shelf", _load_migration("004_seed_suelto_shelf.sql")),
 ]
 
 
