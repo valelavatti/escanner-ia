@@ -195,6 +195,37 @@ async def assign_producto_to_ubicacion(
     return True
 
 
+async def unassign_producto_from_ubicacion(
+    db: aiosqlite.Connection,
+    ubicacion_id: int,
+) -> bool:
+    """Remove the product assignment from a ubicacion (set producto_id = NULL).
+
+    The ubicacion's stock_actual is NOT reset — it stays at whatever the last
+    movimiento left. If the user wants to zero it out, they scan and enter 0.
+    Returns True if the ubicacion existed, False otherwise.
+    """
+    async with db.execute(
+        "SELECT id FROM ubicaciones WHERE id = ?",
+        (ubicacion_id,),
+    ) as cursor:
+        row = await cursor.fetchone()
+
+    if row is None:
+        return False
+
+    await db.execute(
+        """
+        UPDATE ubicaciones
+        SET producto_id = NULL, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (ubicacion_id,),
+    )
+    await db.commit()
+    return True
+
+
 async def get_out_of_bounds_ubicaciones(
     db: aiosqlite.Connection,
     estante_id: int,

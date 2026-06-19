@@ -212,6 +212,12 @@ export async function assignProductToUbicacion(ubicacionId: number, productoSku:
 	});
 }
 
+export async function unassignProductFromUbicacion(ubicacionId: number): Promise<Ubicacion> {
+	return api<Ubicacion>(`/ubicaciones/${ubicacionId}/assign`, {
+		method: 'DELETE'
+	});
+}
+
 export async function searchProductos(query: string): Promise<ProductSearchResult[]> {
 	const encoded = encodeURIComponent(query);
 	const response = await api<{ items: ProductSearchResult[]; total: number }>(

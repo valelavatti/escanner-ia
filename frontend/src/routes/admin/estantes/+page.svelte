@@ -7,6 +7,7 @@
 		deleteEstante,
 		confirmDeleteOutOfBounds,
 		assignProductToUbicacion,
+		unassignProductFromUbicacion,
 		searchProductos,
 		ApiError,
 		type Estante,
@@ -317,6 +318,19 @@
 		}
 	}
 
+	async function handleUnassign(ubicacionId: number) {
+		if (!confirm('¿Quitar el producto de esta ubicación? El historial de movimientos se conserva.')) return;
+		try {
+			await unassignProductFromUbicacion(ubicacionId);
+			if (selectedEstante) {
+				await openDetail(selectedEstante);
+			}
+			showMessage('Producto desasignado de la ubicación');
+		} catch (err) {
+			showMessage(err instanceof Error ? err.message : 'Error al desasignar el producto', 'error');
+		}
+	}
+
 	const activeUbicaciones = $derived(selectedUbicaciones.filter((u) => u.estado === 'activo'));
 </script>
 
@@ -414,25 +428,35 @@
 					class="ubicaciones-grid"
 					style="grid-template-columns: repeat({selectedEstante.columnas}, minmax(48px, 1fr));"
 				>
-					{#each activeUbicaciones as ubicacion (ubicacion.id)}
-						<div class={cellClass(ubicacion)}>
-							<span class="cell__coords">{ubicacion.fila}-{ubicacion.columna}</span>
-							<span class="cell__qr">{ubicacion.qr_valor}</span>
-							{#if ubicacion.producto_id}
-								<span class="cell__product">{ubicacion.producto_sku}</span>
-								<span class="cell__desc">{ubicacion.producto_descripcion ?? ''}</span>
-								<span class="cell__stock">Stock: {ubicacion.stock_actual}</span>
-							{:else}
-								<span class="cell__empty">vacío</span>
+				{#each activeUbicaciones as ubicacion (ubicacion.id)}
+					<div class={cellClass(ubicacion)}>
+						<span class="cell__coords">{ubicacion.fila}-{ubicacion.columna}</span>
+						<span class="cell__qr">{ubicacion.qr_valor}</span>
+						{#if ubicacion.producto_id}
+							<span class="cell__product">{ubicacion.producto_sku}</span>
+							<span class="cell__desc">{ubicacion.producto_descripcion ?? ''}</span>
+							<span class="cell__stock">Stock: {ubicacion.stock_actual}</span>
+							{#if selectedEstante.nombre !== SYSTEM_SHELF_NAME}
 								<button
-									class="button button--small button--primary"
-									onclick={() => openAssign(ubicacion)}
+									class="button button--small button--danger"
+									onclick={() => handleUnassign(ubicacion.id)}
 								>
-									Asignar producto
+									Desasignar
 								</button>
 							{/if}
-						</div>
-					{/each}
+						{:else if selectedEstante.nombre !== SYSTEM_SHELF_NAME}
+							<span class="cell__empty">vacío</span>
+							<button
+								class="button button--small button--primary"
+								onclick={() => openAssign(ubicacion)}
+							>
+								Asignar producto
+							</button>
+						{:else}
+							<span class="cell__empty">sistema</span>
+						{/if}
+					</div>
+				{/each}
 				</div>
 			{/if}
 		</div>
