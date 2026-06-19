@@ -106,7 +106,7 @@ Chain strategy: pending
 
 ## Phase 1: Database Schema
 
-- [ ] **1.1 Create migration v1 for all core tables**
+- [x] **1.1 Create migration v1 for all core tables**
   - **Skill to load:** `SQLite Database Expert`
   - **Context7 query:** none
   - **Depends on:** 0.3
@@ -118,7 +118,7 @@ Chain strategy: pending
   - **Estimated lines:** 120
   - **PR slice:** PR 1b
 
-- [ ] **1.2 Create indexes and foreign-key enforcement migration**
+- [x] **1.2 Create indexes and foreign-key enforcement migration**
   - **Skill to load:** `SQLite Database Expert`
   - **Context7 query:** none
   - **Depends on:** 1.1
@@ -129,7 +129,7 @@ Chain strategy: pending
   - **Estimated lines:** 80
   - **PR slice:** PR 1b
 
-- [ ] **1.3 Seed default usuarios migration**
+- [x] **1.3 Seed default usuarios migration**
   - **Skill to load:** `SQLite Database Expert`
   - **Context7 query:** none
   - **Depends on:** 1.1
@@ -140,7 +140,7 @@ Chain strategy: pending
   - **Estimated lines:** 40
   - **PR slice:** PR 1b
 
-- [ ] **1.4 Wire migration runner into FastAPI startup lifespan**
+- [x] **1.4 Wire migration runner into FastAPI startup lifespan**
   - **Skill to load:** `fastapi-templates`, `SQLite Database Expert`
   - **Context7 query:** none
   - **Depends on:** 1.1, 1.2, 1.3

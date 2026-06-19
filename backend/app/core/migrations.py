@@ -1,10 +1,22 @@
-from typing import Iterable
+from pathlib import Path
 
 import aiosqlite
 
+_BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
+_MIGRATIONS_DIR = _BACKEND_DIR / "migrations"
+
+
+def _load_migration(name: str) -> str:
+    path = _MIGRATIONS_DIR / name
+    return path.read_text(encoding="utf-8")
+
+
 # Versioned migrations: (version, name, sql_script).
-# Work Unit 2 will populate the first schema migration.
-MIGRATIONS: list[tuple[int, str, str]] = []
+MIGRATIONS: list[tuple[int, str, str]] = [
+    (1, "create_tables", _load_migration("001_create_tables.sql")),
+    (2, "create_indexes", _load_migration("002_create_indexes.sql")),
+    (3, "seed_users", _load_migration("003_seed_users.sql")),
+]
 
 
 async def run_migrations(connection: aiosqlite.Connection) -> None:
