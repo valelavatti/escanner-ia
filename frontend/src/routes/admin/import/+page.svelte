@@ -59,7 +59,10 @@
 		}
 
 		if ('duplicate_skus' in detail && Array.isArray(detail.duplicate_skus) && detail.duplicate_skus.length > 0) {
-			return `SKUs duplicados en el Excel: ${detail.duplicate_skus.join(', ')}`;
+			const count = detail.duplicate_skus.length;
+			const sample = detail.duplicate_skus.slice(0, 5).join(', ');
+			const more = count > 5 ? ` (y ${count - 5} más)` : '';
+			return `${count} SKU(s) ya existen en la base de datos. Use la estrategia "Saltear" o "Sobrescribir" para reimportar. Ejemplos: ${sample}${more}`;
 		}
 
 		if ('row_errors' in detail && Array.isArray(detail.row_errors) && detail.row_errors.length > 0) {

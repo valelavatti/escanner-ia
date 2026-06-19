@@ -345,6 +345,15 @@ async def import_products(
     # 5. Intra-Excel barcode conflicts -> skip conflicting rows (keep first occurrence).
     df, skipped_intra_conflicts, intra_conflicts = filter_intra_excel_barcode_conflicts(df)
 
+    # 5b. For strategy=error: check if SKUs already exist in DB -> abort cleanly.
+    if strategy == ImportStrategy.error:
+        excel_skus = df["sku"].dropna().astype(str).str.strip().tolist()
+        existing_skus_in_db = await _get_existing_skus(db, excel_skus)
+        if existing_skus_in_db:
+            raise ImportValidationError(
+                duplicate_skus=sorted(existing_skus_in_db),
+            )
+
     # Total rows is the count after dropping empty rows but before filtering.
     total_rows = len(df) + skipped_no_barcode + skipped_intra_conflicts
 
