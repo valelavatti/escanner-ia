@@ -65,3 +65,26 @@ async def count_productos(db: aiosqlite.Connection) -> int:
     async with db.execute("SELECT COUNT(*) FROM productos") as cursor:
         row = await cursor.fetchone()
         return row[0]
+
+
+async def search_productos(
+    db: aiosqlite.Connection,
+    query: str,
+    limit: int = 20,
+) -> list[dict]:
+    """Search products by SKU, description, or barcode using a partial LIKE match."""
+    pattern = f"%{query}%"
+    async with db.execute(
+        """
+        SELECT sku, descripcion, codigo_de_barra, created_at
+        FROM productos
+        WHERE sku LIKE ?
+           OR descripcion LIKE ?
+           OR codigo_de_barra LIKE ?
+        ORDER BY descripcion
+        LIMIT ?
+        """,
+        (pattern, pattern, pattern, limit),
+    ) as cursor:
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]

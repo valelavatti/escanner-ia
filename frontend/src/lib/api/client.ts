@@ -117,3 +117,105 @@ export async function importExcel(file: File, strategy: string = 'error'): Promi
 		headers: {} // Let browser set Content-Type for multipart
 	});
 }
+
+// Types matching backend schemas
+export interface Estante {
+	id: number;
+	nombre: string;
+	orden_visual: number;
+	filas: number;
+	columnas: number;
+	deleted_at: string | null;
+	created_at: string;
+	ubicaciones_count: number;
+	ubicaciones?: Ubicacion[];
+}
+
+export interface Ubicacion {
+	id: number;
+	estante_id: number;
+	estante_nombre: string;
+	fila: number;
+	columna: number;
+	producto_id: string | null;
+	producto_sku: string | null;
+	producto_descripcion: string | null;
+	stock_actual: number;
+	qr_valor: string;
+	estado: string;
+}
+
+export interface EstanteCreate {
+	nombre: string;
+	orden_visual: number;
+	filas: number;
+	columnas: number;
+}
+
+export interface EstanteUpdate {
+	filas?: number;
+	columnas?: number;
+	orden_visual?: number;
+}
+
+export interface EstanteUpdateResponse {
+	estante: Estante;
+	out_of_bounds: Ubicacion[];
+}
+
+export interface ProductSearchResult {
+	sku: string;
+	descripcion: string;
+	codigo_de_barra: string;
+}
+
+export async function listEstantes(includeDeleted = false): Promise<Estante[]> {
+	return api<Estante[]>(`/estantes?include_deleted=${includeDeleted}`);
+}
+
+export async function getEstante(id: number): Promise<Estante> {
+	return api<Estante>(`/estantes/${id}`);
+}
+
+export async function createEstante(data: EstanteCreate): Promise<Estante> {
+	return api<Estante>('/estantes', {
+		method: 'POST',
+		body: JSON.stringify(data)
+	});
+}
+
+export async function updateEstante(id: number, data: EstanteUpdate): Promise<EstanteUpdateResponse> {
+	return api<EstanteUpdateResponse>(`/estantes/${id}`, {
+		method: 'PUT',
+		body: JSON.stringify(data)
+	});
+}
+
+export async function deleteEstante(id: number): Promise<{ ok: boolean }> {
+	return api<{ ok: boolean }>(`/estantes/${id}`, { method: 'DELETE' });
+}
+
+export async function confirmDeleteOutOfBounds(
+	estanteId: number,
+	ubicacionIds: number[]
+): Promise<{ deleted: number }> {
+	return api<{ deleted: number }>(`/estantes/${estanteId}/confirm-delete-out-of-bounds`, {
+		method: 'POST',
+		body: JSON.stringify({ ubicacion_ids: ubicacionIds })
+	});
+}
+
+export async function assignProductToUbicacion(ubicacionId: number, productoSku: string): Promise<Ubicacion> {
+	return api<Ubicacion>(`/ubicaciones/${ubicacionId}/assign`, {
+		method: 'PUT',
+		body: JSON.stringify({ producto_id: productoSku })
+	});
+}
+
+export async function searchProductos(query: string): Promise<ProductSearchResult[]> {
+	const encoded = encodeURIComponent(query);
+	const response = await api<{ items: ProductSearchResult[]; total: number }>(
+		`/productos?search=${encoded}`
+	);
+	return response.items;
+}

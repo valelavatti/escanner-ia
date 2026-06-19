@@ -211,16 +211,16 @@ Chain strategy: pending
 
 ## Phase 3: Excel Import
 
-- [ ] **3.1 Implement productos repository with search and barcode lookup**
+- [x] **3.1 Implement productos repository with search and barcode lookup**
   - **Skill to load:** `fastapi-templates`, `SQLite Database Expert`
   - **Context7 query:** none
   - **Depends on:** 1.4
   - **Capability:** excel-import
-  - **Files to create/modify:** `backend/app/repositories/products.py`, `backend/app/schemas/products.py`
+  - **Files to create/modify:** `backend/app/repositories/producto_repository.py`, `backend/app/schemas/productos.py`, `backend/app/api/v1/endpoints/productos.py`, `backend/app/api/v1/router.py`
   - **Acceptance criteria:**
-    - [ ] Search by `sku`/`descripcion` with query param.
-    - [ ] Lookup by exact `codigo_de_barra`.
-    - [ ] All queries parameterized.
+    - [x] Search by `sku`/`descripcion`/`codigo_de_barra` with query param.
+    - [x] Lookup by exact `codigo_de_barra`.
+    - [x] All queries parameterized.
   - **Estimated lines:** 80
   - **PR slice:** PR 2a
 
@@ -295,16 +295,16 @@ Chain strategy: pending
   - **Estimated lines:** 110
   - **PR slice:** PR 3a
 
-- [ ] **4.3 Implement shelf admin UI with dimension form and soft-delete warnings**
+- [x] **4.3 Implement shelf admin UI with dimension form and soft-delete warnings**
   - **Skill to load:** `sveltekit-structure`, `Frontend Responsive Design Standards`
   - **Context7 query:** none
   - **Depends on:** 2.4, 4.2
   - **Capability:** shelf-admin
-  - **Files to create/modify:** `frontend/src/routes/admin/estantes/+page.svelte`, `frontend/src/lib/components/ShelfAdmin.svelte`
+  - **Files to create/modify:** `frontend/src/routes/admin/estantes/+page.svelte`, `frontend/src/routes/admin/estantes/+page.ts`, `frontend/src/routes/admin/+layout.svelte`, `frontend/src/lib/api/client.ts`, `frontend/src/routes/+page.svelte`
   - **Acceptance criteria:**
-    - [ ] Create/edit form validates `filas`/`columnas` (1–50) and `orden_visual`.
-    - [ ] Shrinking dimensions shows warning and requires confirmation (spec scenario 3).
-    - [ ] Delete shows warning that history is preserved (spec scenario 4).
+    - [x] Create/edit form validates `filas`/`columnas` (1–50) and `orden_visual`.
+    - [x] Shrinking dimensions shows warning and requires confirmation (spec scenario 3).
+    - [x] Delete shows warning that history is preserved (spec scenario 4).
   - **Estimated lines:** 150
   - **PR slice:** PR 3b
 
