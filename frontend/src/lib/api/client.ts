@@ -169,6 +169,13 @@ export interface ProductSearchResult {
 	codigo_de_barra: string;
 }
 
+export interface Product {
+	sku: string;
+	descripcion: string;
+	codigo_de_barra: string;
+	created_at: string;
+}
+
 export async function listEstantes(includeDeleted = false): Promise<Estante[]> {
 	return api<Estante[]>(`/estantes?include_deleted=${includeDeleted}`);
 }
@@ -224,4 +231,22 @@ export async function searchProductos(query: string): Promise<ProductSearchResul
 		`/productos?search=${encoded}`
 	);
 	return response.items;
+}
+
+// Sector lookup by QR value
+export async function lookupSector(qrValor: string): Promise<Ubicacion> {
+	return api<Ubicacion>(`/sectores/lookup?qr_valor=${encodeURIComponent(qrValor)}`);
+}
+
+// Product lookup by barcode (exact)
+export async function getProductoByBarcode(codigo: string): Promise<Product | null> {
+	try {
+		return await api<Product>(`/productos/${encodeURIComponent(codigo)}`);
+	} catch {
+		return null;
+	}
+}
+
+export async function getEstanteUbicaciones(estanteId: number): Promise<Ubicacion[]> {
+	return api<Ubicacion[]>(`/estantes/${estanteId}/ubicaciones`);
 }
