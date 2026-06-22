@@ -368,30 +368,30 @@ Chain strategy: pending
 
 ## Phase 6: Stock Management
 
-- [ ] **6.1 Implement movimientos repository with transaction, stock chaining, and SQLITE_BUSY retry**
+- [x] **6.1 Implement movimientos repository with transaction, stock chaining, and SQLITE_BUSY retry**
   - **Skill to load:** `fastapi-templates`, `SQLite Database Expert`
   - **Context7 query:** none
   - **Depends on:** 1.4, 2.1
   - **Capability:** stock-management
-  - **Files to create/modify:** `backend/app/repositories/movimientos.py`, `backend/app/services/stock.py`, `backend/app/core/retry.py`
+  - **Files to create/modify:** `backend/app/repositories/movimiento_repository.py`
   - **Acceptance criteria:**
-    - [ ] `alta` adds quantity; `ajuste` sets absolute stock (spec scenarios 1–2).
-    - [ ] Rejects negative `stock_nuevo` (spec scenario 3).
-    - [ ] Retry on `SQLITE_BUSY` up to 3 times (50ms, 100ms, 200ms) then HTTP 503 (spec scenario 5).
-    - [ ] Concurrent writes chain stock correctly (spec scenario 4).
+    - [x] `alta` adds quantity; `ajuste` sets absolute stock (spec scenarios 1–2).
+    - [x] Rejects negative `stock_nuevo` (spec scenario 3).
+    - [x] Retry on `SQLITE_BUSY` up to 3 times (50ms, 100ms, 200ms) then HTTP 503 (spec scenario 5).
+    - [x] Concurrent writes chain stock correctly (spec scenario 4).
   - **Estimated lines:** 150
   - **PR slice:** PR 5a
 
-- [ ] **6.2 Implement `/api/movimientos` endpoints (POST, GET filters/pagination, CSV export)**
+- [x] **6.2 Implement `/api/movimientos` endpoints (POST, GET filters/pagination, CSV export)**
   - **Skill to load:** `fastapi-templates`, `SQLite Database Expert`
   - **Context7 query:** none
   - **Depends on:** 6.1
   - **Capability:** stock-management, audit-trail
-  - **Files to create/modify:** `backend/app/api/movimientos.py`, `backend/app/schemas/movimientos.py`, `backend/main.py`
+  - **Files to create/modify:** `backend/app/api/v1/endpoints/movimientos.py`, `backend/app/schemas/movimiento.py`, `backend/app/api/v1/router.py`
   - **Acceptance criteria:**
-    - [ ] `POST /api/movimientos` returns `MovimientoOut`.
-    - [ ] `GET /api/movimientos` filters by `usuario_id`, `producto_id`, `ubicacion_id`, `desde`, `hasta` and paginates.
-    - [ ] `GET /api/movimientos/export.csv` streams UTF-8 CSV with headers `id,usuario,producto_sku,producto_descripcion,estante,fila,columna,cantidad,stock_anterior,stock_nuevo,fecha_hora,tipo`.
+    - [x] `POST /api/movimientos` returns `MovimientoOut`.
+    - [x] `GET /api/movimientos` filters by `usuario_id`, `producto_id`, `ubicacion_id`, `desde`, `hasta` and paginates.
+    - [x] `GET /api/movimientos/export.csv` streams UTF-8 CSV with headers `id,usuario,producto_sku,producto_descripcion,estante,fila,columna,cantidad,stock_anterior,stock_nuevo,fecha_hora,tipo`.
   - **Estimated lines:** 140
   - **PR slice:** PR 5a
 
