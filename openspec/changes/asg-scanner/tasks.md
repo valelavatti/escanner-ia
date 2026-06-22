@@ -395,7 +395,7 @@ Chain strategy: pending
   - **Estimated lines:** 140
   - **PR slice:** PR 5a
 
-- [ ] **6.3 Create `ProductCard` and `StockInput` components**
+- [x] **6.3 Create `ProductCard` and `StockInput` components**
   - **Skill to load:** `sveltekit-structure`, `Frontend Responsive Design Standards`
   - **Context7 query:** none
   - **Depends on:** 0.4
@@ -408,7 +408,7 @@ Chain strategy: pending
   - **Estimated lines:** 100
   - **PR slice:** PR 5b
 
-- [ ] **6.4 Wire scanner save flow to `/api/movimientos` with success/error feedback**
+- [x] **6.4 Wire scanner save flow to `/api/movimientos` with success/error feedback**
   - **Skill to load:** `sveltekit-structure`, `Frontend Responsive Design Standards`
   - **Context7 query:** none
   - **Depends on:** 5.2, 6.2, 6.3

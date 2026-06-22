@@ -284,6 +284,48 @@ async def get_movimiento_by_id(db: aiosqlite.Connection, movimiento_id: int) -> 
         return dict(row) if row else None
 
 
+async def get_producto_ubicacion_stock(
+    db: aiosqlite.Connection,
+    producto_sku: str,
+    ubicacion_id: int,
+) -> dict:
+    """Return stock and assignment info for a product at a location.
+
+    Returns a dict with ``stock_actual``, ``is_assigned`` and ``es_suelto``.
+    For Suelto the shelf is always considered assigned and stock is the sum
+    of movements. For regular shelves stock is ``ubicaciones.stock_actual``
+    only when the product is assigned to that cell; otherwise stock is 0.
+    """
+    ubicacion = await _fetch_one_row(
+        db,
+        """
+        SELECT u.id, u.producto_id, u.stock_actual, e.nombre AS estante_nombre
+        FROM ubicaciones u
+        JOIN estantes e ON e.id = u.estante_id
+        WHERE u.id = ?
+        """,
+        (ubicacion_id,),
+    )
+    if ubicacion is None:
+        raise UbicacionNotFoundError(f"Ubicacion {ubicacion_id} no encontrada")
+
+    es_suelto = ubicacion["estante_nombre"] == "Suelto"
+    stock = await _get_stock_anterior(db, producto_sku, ubicacion_id, es_suelto)
+
+    if es_suelto:
+        is_assigned = True
+    else:
+        is_assigned = ubicacion["producto_id"] == producto_sku
+        if not is_assigned:
+            stock = 0
+
+    return {
+        "stock_actual": stock,
+        "is_assigned": is_assigned,
+        "es_suelto": es_suelto,
+    }
+
+
 async def get_stock_by_producto_in_ubicacion(
     db: aiosqlite.Connection,
     producto_sku: str,

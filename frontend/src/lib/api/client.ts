@@ -176,6 +176,39 @@ export interface Product {
 	created_at: string;
 }
 
+export interface UbicacionStockInfo {
+	ubicacion_id: number;
+	stock_actual: number;
+	is_assigned: boolean;
+}
+
+export interface ProductWithUbicacionStock extends Product {
+	ubicacion_stock: UbicacionStockInfo | null;
+}
+
+export interface MovimientoCreate {
+	producto_sku: string;
+	ubicacion_id: number;
+	cantidad: number;
+	tipo: 'alta' | 'ajuste';
+}
+
+export interface MovimientoResponse {
+	id: number;
+	usuario_id: number;
+	usuario_nombre: string;
+	producto_sku: string;
+	producto_descripcion: string;
+	ubicacion_id: number;
+	ubicacion_qr: string;
+	estante_nombre: string;
+	cantidad: number;
+	stock_anterior: number;
+	stock_nuevo: number;
+	timestamp: string;
+	tipo: string;
+}
+
 export async function listEstantes(includeDeleted = false): Promise<Estante[]> {
 	return api<Estante[]>(`/estantes?include_deleted=${includeDeleted}`);
 }
@@ -245,6 +278,27 @@ export async function getProductoByBarcode(codigo: string): Promise<Product | nu
 	} catch {
 		return null;
 	}
+}
+
+// Product lookup with stock info for the anchored ubicacion
+export async function getProductoByBarcodeWithStock(
+	codigo: string,
+	ubicacionId: number
+): Promise<ProductWithUbicacionStock | null> {
+	try {
+		return await api<ProductWithUbicacionStock>(
+			`/productos/${encodeURIComponent(codigo)}?ubicacion_id=${ubicacionId}`
+		);
+	} catch {
+		return null;
+	}
+}
+
+export async function createMovimiento(data: MovimientoCreate): Promise<MovimientoResponse> {
+	return api<MovimientoResponse>('/movimientos', {
+		method: 'POST',
+		body: JSON.stringify(data)
+	});
 }
 
 export async function getEstanteUbicaciones(estanteId: number): Promise<Ubicacion[]> {

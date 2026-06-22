@@ -5,19 +5,27 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.api.v1.deps import get_current_user
 from app.core.database import get_db
-from app.repositories import producto_repository
+from app.repositories import movimiento_repository, producto_repository
 from app.schemas.auth import UsuarioResponse
-from app.schemas.productos import ProductOut, ProductSearchResponse
+from app.schemas.productos import ProductOut, ProductSearchResponse, UbicacionStockInfo
 
 router = APIRouter()
 
 
-def _product_out(row: dict) -> ProductOut:
+def _product_out(row: dict, ubicacion_stock: dict | None = None) -> ProductOut:
+    stock_info = None
+    if ubicacion_stock is not None:
+        stock_info = UbicacionStockInfo(
+            ubicacion_id=ubicacion_stock["ubicacion_id"],
+            stock_actual=ubicacion_stock["stock_actual"],
+            is_assigned=ubicacion_stock["is_assigned"],
+        )
     return ProductOut(
         sku=row["sku"],
         descripcion=row["descripcion"],
         codigo_de_barra=row["codigo_de_barra"],
         created_at=row.get("created_at"),
+        ubicacion_stock=stock_info,
     )
 
 
@@ -37,14 +45,33 @@ async def list_productos(
 @router.get("/{codigo_de_barra}", response_model=ProductOut)
 async def get_producto_by_barcode(
     codigo_de_barra: str,
+    ubicacion_id: int | None = Query(None, ge=1, description="ID de ubicacion para incluir stock actual"),
     db: aiosqlite.Connection = Depends(get_db),
     user: UsuarioResponse = Depends(get_current_user),
 ):
-    """Look up a single product by exact barcode."""
+    """Look up a single product by exact barcode.
+
+    If ``ubicacion_id`` is provided, the response includes the product's
+    current stock and assignment state for that location.
+    """
     row = await producto_repository.get_producto_by_codigo(db, codigo_de_barra)
     if row is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Producto no encontrado",
         )
-    return _product_out(row)
+
+    ubicacion_stock = None
+    if ubicacion_id is not None:
+        try:
+            ubicacion_stock = await movimiento_repository.get_producto_ubicacion_stock(
+                db, row["sku"], ubicacion_id
+            )
+            ubicacion_stock["ubicacion_id"] = ubicacion_id
+        except movimiento_repository.UbicacionNotFoundError:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Ubicacion no encontrada",
+            )
+
+    return _product_out(row, ubicacion_stock)

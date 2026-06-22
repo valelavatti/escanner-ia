@@ -2,14 +2,16 @@
 	import { fade } from 'svelte/transition';
 	import { get } from 'svelte/store';
 	import Scanner from '$lib/components/Scanner.svelte';
+	import ProductCard from '$lib/components/ProductCard.svelte';
 	import { scannerState, anchoredLocation, type AnchoredLocation } from '$lib/stores/scanner';
 	import {
 		listEstantes,
 		getEstanteUbicaciones,
 		lookupSector,
-		getProductoByBarcode
+		getProductoByBarcodeWithStock,
+		createMovimiento
 	} from '$lib/api/client';
-	import type { Estante, Ubicacion, Product } from '$lib/api/client';
+	import type { Estante, Ubicacion, ProductWithUbicacionStock } from '$lib/api/client';
 
 	interface LastScan {
 		text: string;
@@ -25,11 +27,15 @@
 
 	let cameraError = $state('');
 	let lastScan = $state<LastScan | null>(null);
-	let lastProduct = $state<Product | null>(null);
+	let scannedProduct = $state<ProductWithUbicacionStock | null>(null);
 
 	let lastScannedCode = $state('');
 	let lastScannedTime = $state(0);
 	const DEBOUNCE_MS = 2000;
+
+	let quantity = $state(0);
+	let mode = $state<'alta' | 'ajuste'>('alta');
+	let isSaving = $state(false);
 
 	let greenFlash = $state<string | null>(null);
 	let greenFlashTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -85,6 +91,7 @@
 				columna: ubicacion.columna
 			};
 			anchoredLocation.set(anchored);
+			clearScannedProduct();
 			showGreenFlash(`Ubicación anclada: ${ubicacion.estante_nombre} ${ubicacion.qr_valor}`);
 		} catch (err) {
 			showError(`QR no reconocido: ${qrValor} — no es un sector válido`);
@@ -98,20 +105,89 @@
 			return;
 		}
 
+		scannerRef?.pause();
+
 		try {
-			const product = await getProductoByBarcode(barcode);
+			const product = await getProductoByBarcodeWithStock(barcode, location.ubicacion_id);
 			if (!product) {
 				showError(`Producto no encontrado: ${barcode}`);
-				lastProduct = null;
+				clearScannedProduct();
+				scannerRef?.resume();
 				return;
 			}
 
-			lastProduct = product;
+			scannedProduct = product;
+			quantity = 0;
+			mode = 'alta';
 			showGreenFlash(`Producto: ${product.sku} — ${product.descripcion?.substring(0, 40) ?? ''}`);
 		} catch (err) {
 			showError(`Error al buscar producto: ${barcode}`);
-			lastProduct = null;
+			clearScannedProduct();
+			scannerRef?.resume();
 		}
+	}
+
+	function clearScannedProduct() {
+		scannedProduct = null;
+		quantity = 0;
+		mode = 'alta';
+	}
+
+	async function handleSave() {
+		const location = get(anchoredLocation);
+		if (!location || !scannedProduct) {
+			showError('No hay producto ni ubicación para guardar');
+			return;
+		}
+
+		if (!Number.isFinite(quantity) || quantity < 0) {
+			showError('La cantidad debe ser un número mayor o igual a 0');
+			return;
+		}
+
+		isSaving = true;
+		try {
+			const response = await createMovimiento({
+				producto_sku: scannedProduct.sku,
+				ubicacion_id: location.ubicacion_id,
+				cantidad: quantity,
+				tipo: mode
+			});
+
+			showGreenFlash(`Stock guardado: ${response.stock_anterior} → ${response.stock_nuevo}`);
+
+			if (scannedProduct.ubicacion_stock) {
+				scannedProduct = {
+					...scannedProduct,
+					ubicacion_stock: {
+						...scannedProduct.ubicacion_stock,
+						stock_actual: response.stock_nuevo,
+						is_assigned: true
+					}
+				};
+			}
+
+			quantity = 0;
+			scannerRef?.resume();
+		} catch (err) {
+			const message = err instanceof Error ? err.message : 'Error al guardar el movimiento';
+			showError(message);
+		} finally {
+			isSaving = false;
+		}
+	}
+
+	function handleClose() {
+		clearScannedProduct();
+		scannerRef?.resume();
+	}
+
+	function handleQuantityChange(value: number) {
+		quantity = value;
+	}
+
+	function handleModeChange(newMode: 'alta' | 'ajuste') {
+		mode = newMode;
 	}
 
 	function handleError(error: string) {
@@ -133,7 +209,7 @@
 
 	function clearAnchoredLocation() {
 		anchoredLocation.set(null);
-		lastProduct = null;
+		clearScannedProduct();
 	}
 
 	function openLocationModal() {
@@ -188,6 +264,7 @@
 			columna: ubicacion.columna
 		};
 		anchoredLocation.set(anchored);
+		clearScannedProduct();
 		showGreenFlash(`Ubicación anclada: ${ubicacion.estante_nombre} ${ubicacion.qr_valor}`);
 		showLocationModal = false;
 	}
@@ -255,12 +332,17 @@
 		{/if}
 	</div>
 
-	{#if lastProduct}
-		<div class="scanner-page__product">
-			<div class="product__sku">{lastProduct.sku}</div>
-			<div class="product__desc">{lastProduct.descripcion}</div>
-			<div class="product__barcode">{lastProduct.codigo_de_barra}</div>
-		</div>
+	{#if scannedProduct}
+		<ProductCard
+			product={scannedProduct}
+			{quantity}
+			{mode}
+			{isSaving}
+			onQuantityChange={handleQuantityChange}
+			onModeChange={handleModeChange}
+			onSave={handleSave}
+			onClose={handleClose}
+		/>
 	{/if}
 
 	<div class="scanner-page__controls">
@@ -412,32 +494,6 @@
 
 	.location-text {
 		flex: 1 1 auto;
-	}
-
-	.scanner-page__product {
-		padding: 0.75rem;
-		background-color: #f0fdf4;
-		border: 1px solid #bbf7d0;
-		border-radius: 0.5rem;
-	}
-
-	.product__sku {
-		font-size: 0.875rem;
-		font-weight: 700;
-		color: #15803d;
-	}
-
-	.product__desc {
-		margin-top: 0.25rem;
-		font-size: 1rem;
-		font-weight: 600;
-		color: #0f172a;
-	}
-
-	.product__barcode {
-		margin-top: 0.25rem;
-		font-size: 0.875rem;
-		color: #475569;
 	}
 
 	.scanner-page__controls {
