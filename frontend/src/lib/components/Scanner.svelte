@@ -17,7 +17,11 @@
 	let torchSupported = $state(false);
 	let zoomSupported = $state(false);
 	let torchOn = $state(false);
-	let zoomValue = $state(2);
+
+	let zoomMin = $state(1);
+	let zoomMax = $state(10);
+	let zoomStep = $state(0.5);
+	let zoomValue = $state(1);
 
 	export function pause() {
 		if (!scannerObj) return;
@@ -197,7 +201,10 @@
 			if ('zoom' in caps && typeof caps.zoom === 'object' && caps.zoom !== null) {
 				zoomSupported = true;
 				const z = caps.zoom as { min?: number; max?: number; step?: number };
-				zoomValue = z.max != null ? Math.min(Math.max(2, z.min ?? 1), z.max) : 2;
+				zoomMin = z.min ?? 1;
+				zoomMax = z.max ?? 10;
+				zoomStep = z.step ?? 0.5;
+				zoomValue = Math.min(Math.max(2, zoomMin), zoomMax);
 			}
 		} catch {
 			// ignore
@@ -254,9 +261,9 @@
 					Zoom
 					<input
 						type="range"
-						min="1"
-						max="5"
-						step="0.1"
+						min={zoomMin}
+						max={zoomMax}
+						step={zoomStep}
 						value={zoomValue}
 						oninput={handleZoomChange}
 					/>

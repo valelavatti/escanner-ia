@@ -323,7 +323,7 @@ Chain strategy: pending
 
 ## Phase 5: Barcode Scanning
 
-- [ ] **5.1 Create `Scanner.svelte` wrapper for html5-qrcode with lifecycle and camera error handling**
+- [x] **5.1 Create `Scanner.svelte` wrapper for html5-qrcode with lifecycle and camera error handling**
   - **Skill to load:** `sveltekit-structure`, `Frontend Responsive Design Standards`
   - **Context7 query:** `/mebjas/html5-qrcode` (scanner lifecycle, `stop()`/`clear()`, camera permissions, `Html5QrcodeScannerState`)
   - **Depends on:** 0.2
@@ -337,7 +337,7 @@ Chain strategy: pending
   - **Estimated lines:** 140
   - **PR slice:** PR 4a
 
-- [ ] **5.2 Add scanner format detection, debounce, and anchored-location flow**
+- [x] **5.2 Add scanner format detection, debounce, and anchored-location flow**
   - **Skill to load:** `sveltekit-structure`
   - **Context7 query:** `/mebjas/html5-qrcode` (format detection callback, `result.result.format.formatName`, `pause()`/`resume()`)
   - **Depends on:** 5.1, 2.3 (session), 4.4 (sector lookup), 3.1 (product lookup)
@@ -351,7 +351,7 @@ Chain strategy: pending
   - **Estimated lines:** 130
   - **PR slice:** PR 4b
 
-- [ ] **5.3 Build `/scanner` page layout with anchored location banner and scan status**
+- [x] **5.3 Build `/scanner` page layout with anchored location banner and scan status**
   - **Skill to load:** `sveltekit-structure`, `Frontend Responsive Design Standards`
   - **Context7 query:** none
   - **Depends on:** 5.2
