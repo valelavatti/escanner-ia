@@ -2,9 +2,18 @@
 	import { onMount } from 'svelte';
 	import WarehouseMap from '$lib/components/WarehouseMap.svelte';
 	import MapDetailPanel from '$lib/components/MapDetailPanel.svelte';
-	import { listDepositos, listEstantes, getEstante } from '$lib/api/client';
+	import ProductSearchModal from '$lib/components/ProductSearchModal.svelte';
+	import {
+		listDepositos,
+		listEstantes,
+		getEstante,
+		assignProductToUbicacion,
+		unassignProductFromUbicacion,
+		searchProductos,
+		ApiError
+	} from '$lib/api/client';
 	import { mapStore } from '$lib/stores/map';
-	import type { Deposito, Estante, Ubicacion } from '$lib/api/client';
+	import type { Deposito, Estante, Ubicacion, ProductSearchResult } from '$lib/api/client';
 
 	type EstanteWithUbicaciones = Estante & { ubicaciones: Ubicacion[] };
 
@@ -12,6 +21,17 @@
 	let estantes = $state<EstanteWithUbicaciones[]>([]);
 	let loading = $state(true);
 	let error = $state('');
+
+	type ActionType = 'assign' | 'change' | 'unassign';
+
+	let actionLoading = $state<ActionType | null>(null);
+	let actionError = $state<string | null>(null);
+
+	let searchModalOpen = $state(false);
+	let searchModalMode = $state<ActionType>('assign');
+	let searchResults = $state<ProductSearchResult[]>([]);
+	let searchSearching = $state(false);
+	let searchSelecting = $state(false);
 
 	const selectedCellId = $derived($mapStore.selectedCellId);
 	const selectedUbicacion = $derived(
@@ -68,11 +88,161 @@
 			...s,
 			selectedCellId: s.selectedCellId === ubicacion.id ? null : ubicacion.id
 		}));
+		clearActionError();
 	}
 
 	function handleClosePanel() {
 		mapStore.update((s) => ({ ...s, selectedCellId: null }));
+		clearActionError();
 	}
+
+	function clearActionError() {
+		actionError = null;
+	}
+
+	async function refreshEstante(estanteId: number) {
+		const detail = await getEstante(estanteId);
+		estantes = estantes.map((e) =>
+			e.id === estanteId ? { ...e, ubicaciones: detail.ubicaciones ?? [] } : e
+		);
+		mapStore.update((s) => ({
+			...s,
+			ubicaciones: { ...s.ubicaciones, [estanteId]: detail.ubicaciones ?? [] }
+		}));
+	}
+
+	function openSearchModal(mode: ActionType) {
+		searchModalMode = mode;
+		searchResults = [];
+		searchSearching = false;
+		searchSelecting = false;
+		searchModalOpen = true;
+		clearActionError();
+	}
+
+	function closeSearchModal() {
+		searchModalOpen = false;
+		searchResults = [];
+		searchSearching = false;
+		searchSelecting = false;
+	}
+
+	async function handleSearch(query: string) {
+		searchSearching = true;
+		try {
+			searchResults = await searchProductos(query);
+		} catch (err) {
+			actionError = err instanceof Error ? err.message : 'Error al buscar productos';
+			searchResults = [];
+		} finally {
+			searchSearching = false;
+		}
+	}
+
+	function formatActionError(
+		err: unknown,
+		fallback: string,
+		networkMessage: string = 'Error de conexión'
+	): string {
+		if (err instanceof ApiError) {
+			if (err.status === 409) return 'Esta ubicación ya tiene un producto asignado';
+			if (err.status === 400) {
+				const msg = err.message.toLowerCase();
+				if (msg.includes('suelto')) {
+					return 'El estante Suelto no admite asignación de productos individuales';
+				}
+			}
+			return err.message || fallback;
+		}
+		if (err instanceof TypeError) {
+			return networkMessage;
+		}
+		return err instanceof Error ? err.message : fallback;
+	}
+
+	async function handleAssignProduct(sku: string) {
+		if (!selectedUbicacion) return;
+		actionLoading = 'assign';
+		clearActionError();
+		try {
+			await assignProductToUbicacion(selectedUbicacion.id, sku);
+			await refreshEstante(selectedUbicacion.estante_id);
+		} catch (err) {
+			actionError = formatActionError(
+				err,
+				'Error al asignar el producto',
+				'Error de conexión al asignar producto'
+			);
+			await refreshEstante(selectedUbicacion.estante_id).catch(() => {});
+		} finally {
+			actionLoading = null;
+			closeSearchModal();
+		}
+	}
+
+	async function handleChangeProduct(sku: string) {
+		if (!selectedUbicacion) return;
+		actionLoading = 'change';
+		clearActionError();
+		try {
+			await unassignProductFromUbicacion(selectedUbicacion.id);
+			await assignProductToUbicacion(selectedUbicacion.id, sku);
+			await refreshEstante(selectedUbicacion.estante_id);
+		} catch (err) {
+			actionError = formatActionError(
+				err,
+				'Error al cambiar el producto',
+				'Error de conexión al cambiar el producto'
+			);
+			await refreshEstante(selectedUbicacion.estante_id).catch(() => {});
+		} finally {
+			actionLoading = null;
+			closeSearchModal();
+		}
+	}
+
+	async function handleUnassign() {
+		if (!selectedUbicacion?.producto_sku) return;
+		const confirmed = window.confirm(
+			`¿Quitar ${selectedUbicacion.producto_sku} - ${selectedUbicacion.producto_descripcion || ''} de ${selectedUbicacion.estante_nombre} ${selectedUbicacion.qr_valor}?`
+		);
+		if (!confirmed) return;
+
+		actionLoading = 'unassign';
+		clearActionError();
+		try {
+			await unassignProductFromUbicacion(selectedUbicacion.id);
+			await refreshEstante(selectedUbicacion.estante_id);
+		} catch (err) {
+			actionError = formatActionError(
+				err,
+				'Error al desasignar el producto',
+				'Error de conexión al desasignar el producto'
+			);
+		} finally {
+			actionLoading = null;
+		}
+	}
+
+	async function handleSelectProduct(product: ProductSearchResult) {
+		searchSelecting = true;
+		clearActionError();
+		try {
+			if (searchModalMode === 'assign') {
+				await handleAssignProduct(product.sku);
+			} else {
+				await handleChangeProduct(product.sku);
+			}
+		} finally {
+			searchSelecting = false;
+		}
+	}
+
+	const searchModalTitle = $derived(
+		searchModalMode === 'assign'
+			? `Asignar producto a ${selectedUbicacion?.qr_valor ?? ''}`
+			: `Cambiar producto en ${selectedUbicacion?.qr_valor ?? ''}`
+	);
 </script>
 
 <div class="map-page" class:map-page--panel-open={selectedUbicacion}>
@@ -113,8 +283,27 @@
 </div>
 
 {#if selectedUbicacion}
-	<MapDetailPanel selectedUbicacion={selectedUbicacion} onClose={handleClosePanel} />
+	<MapDetailPanel
+		selectedUbicacion={selectedUbicacion}
+		onClose={handleClosePanel}
+		onAssign={() => openSearchModal('assign')}
+		onChange={() => openSearchModal('change')}
+		onUnassign={handleUnassign}
+		loadingAction={actionLoading}
+		actionError={actionError}
+	/>
 {/if}
+
+<ProductSearchModal
+	open={searchModalOpen}
+	title={searchModalTitle}
+	searching={searchSearching}
+	selecting={searchSelecting}
+	results={searchResults}
+	onclose={closeSearchModal}
+	onsearch={handleSearch}
+	onselect={handleSelectProduct}
+/>
 
 <style>
 	.map-page {

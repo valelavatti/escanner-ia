@@ -5,9 +5,22 @@
 	interface Props {
 		selectedUbicacion: Ubicacion;
 		onClose: () => void;
+		onAssign: () => void;
+		onChange: () => void;
+		onUnassign: () => void;
+		loadingAction?: 'assign' | 'change' | 'unassign' | null;
+		actionError?: string | null;
 	}
 
-	let { selectedUbicacion, onClose }: Props = $props();
+	let {
+		selectedUbicacion,
+		onClose,
+		onAssign,
+		onChange,
+		onUnassign,
+		loadingAction = null,
+		actionError = null
+	}: Props = $props();
 	let visible = $state(false);
 
 	const isSuelto = $derived(selectedUbicacion.estante_nombre.toLowerCase().startsWith('suelto'));
@@ -57,25 +70,44 @@
 				</div>
 			</div>
 			<div class="detail-panel__actions">
-				<button class="button button--primary" disabled title="Próximamente">
-					Cambiar producto
+				<button
+					type="button"
+					class="button button--primary"
+					onclick={onChange}
+					disabled={loadingAction === 'change'}
+				>
+					{loadingAction === 'change' ? 'Cambiando...' : 'Cambiar producto'}
 				</button>
-				<button class="button button--danger-outline" disabled title="Próximamente">
-					Desasignar
+				<button
+					type="button"
+					class="button button--danger-outline"
+					onclick={onUnassign}
+					disabled={loadingAction === 'unassign'}
+				>
+					{loadingAction === 'unassign' ? 'Desasignando...' : 'Desasignar'}
 				</button>
 			</div>
-			<p class="detail-panel__note">Asignación y desasignación — Work Unit 14</p>
+			{#if actionError}
+				<p class="detail-panel__error" role="alert">{actionError}</p>
+			{/if}
 		{:else}
 			<div class="detail-panel__empty">
 				<span class="detail-panel__empty-icon">⬜</span>
 				<span>Ubicación vacía</span>
 			</div>
 			<div class="detail-panel__actions">
-				<button class="button button--primary" disabled title="Próximamente">
-					Asignar producto
+				<button
+					type="button"
+					class="button button--primary"
+					onclick={onAssign}
+					disabled={loadingAction === 'assign'}
+				>
+					{loadingAction === 'assign' ? 'Asignando...' : 'Asignar producto'}
 				</button>
 			</div>
-			<p class="detail-panel__note">Asignación de productos — Work Unit 14</p>
+			{#if actionError}
+				<p class="detail-panel__error" role="alert">{actionError}</p>
+			{/if}
 		{/if}
 	{/if}
 </div>
@@ -198,10 +230,14 @@
 		margin-top: 1rem;
 	}
 
-	.detail-panel__note {
+	.detail-panel__error {
 		margin: 0.75rem 0 0;
-		font-size: 0.75rem;
-		color: #94a3b8;
+		padding: 0.625rem 0.75rem;
+		font-size: 0.875rem;
+		font-weight: 500;
+		color: #991b1b;
+		background-color: #fee2e2;
+		border-radius: 0.5rem;
 	}
 
 	.button {

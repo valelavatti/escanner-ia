@@ -72,6 +72,8 @@
 		touch-action: manipulation;
 		user-select: none;
 		overflow: hidden;
+		transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease,
+			transform 0.15s ease;
 	}
 
 	.cell--occupied {
