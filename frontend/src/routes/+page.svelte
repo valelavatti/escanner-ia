@@ -10,6 +10,7 @@
 		<p>Hola, {$sessionStore.usuario.nombre}</p>
 		<div class="home__actions">
 			<a href="/scanner" class="home__action">Escanear</a>
+			<a href="/mapa" class="home__action home__action--secondary">Ver mapa</a>
 			<a href="/admin/import" class="home__action home__action--secondary">Importar productos</a>
 			<a href="/admin/estantes" class="home__action home__action--secondary">Gestionar estantes</a>
 		</div>

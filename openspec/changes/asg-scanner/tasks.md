@@ -425,7 +425,7 @@ Chain strategy: pending
 
 ## Phase 7: Visual Map
 
-- [ ] **7.1 Create map store and `/mapa` page shell with SSR disabled**
+- [x] **7.1 Create map store and `/mapa` page shell with SSR disabled**
   - **Skill to load:** `sveltekit-structure`
   - **Context7 query:** none
   - **Depends on:** 0.4, 2.3
@@ -438,7 +438,7 @@ Chain strategy: pending
   - **Estimated lines:** 80
   - **PR slice:** PR 6a
 
-- [ ] **7.2 Build `ShelfGrid.svelte` with variable rows/columns and 48px cells**
+- [x] **7.2 Build `ShelfGrid.svelte` with variable rows/columns and 48px cells**
   - **Skill to load:** `sveltekit-structure`, `Frontend Responsive Design Standards`
   - **Context7 query:** none
   - **Depends on:** 7.1
@@ -451,7 +451,7 @@ Chain strategy: pending
   - **Estimated lines:** 90
   - **PR slice:** PR 6a
 
-- [ ] **7.3 Build `LocationCell.svelte` with color coding and tap selection**
+- [x] **7.3 Build `LocationCell.svelte` with color coding and tap selection**
   - **Skill to load:** `sveltekit-structure`, `Frontend Responsive Design Standards`
   - **Context7 query:** none
   - **Depends on:** 7.2
@@ -463,7 +463,7 @@ Chain strategy: pending
   - **Estimated lines:** 80
   - **PR slice:** PR 6b
 
-- [ ] **7.4 Build `WarehouseMap.svelte` stacking shelves and detail panel**
+- [x] **7.4 Build `WarehouseMap.svelte` stacking shelves and detail panel**
   - **Skill to load:** `sveltekit-structure`, `Frontend Responsive Design Standards`
   - **Context7 query:** none
   - **Depends on:** 7.3
