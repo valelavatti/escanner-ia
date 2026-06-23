@@ -1,6 +1,7 @@
 """Estante (shelf) administration endpoints."""
 
 from sqlite3 import IntegrityError
+from typing import Optional
 
 import aiosqlite
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -11,6 +12,7 @@ from app.repositories import estante_repository, ubicacion_repository
 from app.schemas.auth import UsuarioResponse
 from app.schemas.estante import (
     ConfirmDeleteOutOfBoundsRequest,
+    DepositoResponse,
     EstanteCreate,
     EstanteDetailResponse,
     EstanteResponse,
@@ -20,6 +22,7 @@ from app.schemas.estante import (
 )
 
 router = APIRouter()
+depositos_router = APIRouter()
 
 
 def _estante_response(row: dict) -> EstanteResponse:
@@ -29,6 +32,8 @@ def _estante_response(row: dict) -> EstanteResponse:
         orden_visual=row["orden_visual"],
         filas=row["filas"],
         columnas=row["columnas"],
+        deposito_id=row.get("deposito_id"),
+        deposito_nombre=row.get("deposito_nombre"),
         deleted_at=row.get("deleted_at"),
         created_at=row.get("created_at"),
         ubicaciones_count=row.get("ubicaciones_count", 0),
@@ -67,7 +72,12 @@ async def create_estante(
 
     try:
         estante_id = await estante_repository.create_estante(
-            db, data.nombre, data.orden_visual, data.filas, data.columnas
+            db,
+            data.nombre,
+            data.orden_visual,
+            data.filas,
+            data.columnas,
+            deposito_id=data.deposito_id,
         )
     except IntegrityError:
         raise HTTPException(
@@ -84,12 +94,25 @@ async def create_estante(
 @router.get("", response_model=list[EstanteResponse])
 async def list_estantes(
     include_deleted: bool = Query(False),
+    deposito_id: Optional[int] = Query(None),
     db: aiosqlite.Connection = Depends(get_db),
     user: UsuarioResponse = Depends(get_current_user),
 ):
     """List all estantes ordered by visual order."""
-    rows = await estante_repository.list_estantes(db, include_deleted=include_deleted)
+    rows = await estante_repository.list_estantes(
+        db, include_deleted=include_deleted, deposito_id=deposito_id
+    )
     return [_estante_response(row) for row in rows]
+
+
+@depositos_router.get("", response_model=list[DepositoResponse])
+async def list_depositos(
+    db: aiosqlite.Connection = Depends(get_db),
+    user: UsuarioResponse = Depends(get_current_user),
+):
+    """List all depositos (warehouses) ordered by name."""
+    rows = await estante_repository.list_depositos(db)
+    return [DepositoResponse(id=row["id"], nombre=row["nombre"]) for row in rows]
 
 
 @router.get("/{estante_id}", response_model=EstanteDetailResponse)

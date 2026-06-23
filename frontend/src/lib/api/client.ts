@@ -119,12 +119,19 @@ export async function importExcel(file: File, strategy: string = 'error'): Promi
 }
 
 // Types matching backend schemas
+export interface Deposito {
+	id: number;
+	nombre: string;
+}
+
 export interface Estante {
 	id: number;
 	nombre: string;
 	orden_visual: number;
 	filas: number;
 	columnas: number;
+	deposito_id: number | null;
+	deposito_nombre: string | null;
 	deleted_at: string | null;
 	created_at: string;
 	ubicaciones_count: number;
@@ -150,6 +157,7 @@ export interface EstanteCreate {
 	orden_visual: number;
 	filas: number;
 	columnas: number;
+	deposito_id?: number | null;
 }
 
 export interface EstanteUpdate {
@@ -210,8 +218,20 @@ export interface MovimientoResponse {
 	tipo: string;
 }
 
-export async function listEstantes(includeDeleted = false): Promise<Estante[]> {
-	return api<Estante[]>(`/estantes?include_deleted=${includeDeleted}`);
+export async function listDepositos(): Promise<Deposito[]> {
+	return api<Deposito[]>('/depositos');
+}
+
+export async function listEstantes(
+	includeDeleted = false,
+	depositoId: number | null = null
+): Promise<Estante[]> {
+	const params = new URLSearchParams();
+	params.set('include_deleted', String(includeDeleted));
+	if (depositoId != null) {
+		params.set('deposito_id', String(depositoId));
+	}
+	return api<Estante[]>(`/estantes?${params.toString()}`);
 }
 
 export async function getEstante(id: number): Promise<Estante> {

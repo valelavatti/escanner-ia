@@ -1,6 +1,7 @@
 <script lang="ts">
 	import {
 		listEstantes,
+		listDepositos,
 		getEstante,
 		createEstante,
 		updateEstante,
@@ -11,6 +12,7 @@
 		searchProductos,
 		ApiError,
 		type Estante,
+		type Deposito,
 		type Ubicacion,
 		type ProductSearchResult
 	} from '$lib/api/client';
@@ -19,6 +21,8 @@
 	// State
 	// ---------------------------------------------------------------------------
 	let estantes = $state<Estante[]>([]);
+	let depositos = $state<Deposito[]>([]);
+	let selectedDepositoId = $state<number | null>(null);
 	let loading = $state(false);
 	let message = $state<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -32,6 +36,7 @@
 	let createOrden = $state(0);
 	let createFilas = $state(1);
 	let createColumnas = $state(1);
+	let createDepositoId = $state<number | null>(null);
 	let creating = $state(false);
 
 	// Edit form
@@ -61,7 +66,9 @@
 	let assigning = $state(false);
 
 	const SYSTEM_SHELF_NAME = 'Suelto';
+	const CENTRAL_DEPOSITO_NAME = 'Depósito Central';
 
+	loadDepositos();
 	loadEstantes();
 
 	// ---------------------------------------------------------------------------
@@ -89,10 +96,22 @@
 		return ubicacion.producto_id ? 'cell cell--occupied' : 'cell cell--empty';
 	}
 
+	async function loadDepositos() {
+		try {
+			depositos = await listDepositos();
+			const central = depositos.find((d) => d.nombre === CENTRAL_DEPOSITO_NAME);
+			if (central) {
+				createDepositoId = central.id;
+			}
+		} catch (err) {
+			showMessage(err instanceof Error ? err.message : 'Error al cargar depósitos', 'error');
+		}
+	}
+
 	async function loadEstantes() {
 		loading = true;
 		try {
-			estantes = await listEstantes();
+			estantes = await listEstantes(false, selectedDepositoId);
 		} catch (err) {
 			showMessage(err instanceof Error ? err.message : 'Error al cargar estantes', 'error');
 		} finally {
@@ -125,6 +144,7 @@
 		createOrden = 0;
 		createFilas = 1;
 		createColumnas = 1;
+		createDepositoId = depositos.find((d) => d.nombre === CENTRAL_DEPOSITO_NAME)?.id ?? null;
 		createOpen = false;
 	}
 
@@ -147,7 +167,8 @@
 				nombre,
 				orden_visual: Number(createOrden),
 				filas,
-				columnas
+				columnas,
+				deposito_id: createDepositoId
 			});
 			resetCreateForm();
 			await loadEstantes();
@@ -353,6 +374,24 @@
 			</div>
 		{/if}
 
+		<label class="field-label" for="deposito-filter">Depósito</label>
+		<select
+			id="deposito-filter"
+			class="field-input field-input--select"
+			value={selectedDepositoId ?? ''}
+			onchange={(e) => {
+				const value = (e.target as HTMLSelectElement).value;
+				selectedDepositoId = value === '' ? null : Number(value);
+				loadEstantes();
+			}}
+			disabled={loading}
+		>
+			<option value="">Todos</option>
+			{#each depositos as deposito}
+				<option value={deposito.id}>{deposito.nombre}</option>
+			{/each}
+		</select>
+
 		{#if loading && estantes.length === 0}
 			<p class="loading">Cargando…</p>
 		{:else if estantes.length === 0}
@@ -371,6 +410,9 @@
 						<div class="estante-card__meta">
 							<span>{estante.filas} × {estante.columnas}</span>
 							<span>{estante.ubicaciones_count} ubicaciones</span>
+							{#if estante.deposito_nombre}
+								<span>{estante.deposito_nombre}</span>
+							{/if}
 							<span class="qr-preview">{qrPreview(estante.nombre, estante.filas, estante.columnas)}</span>
 						</div>
 
@@ -410,6 +452,9 @@
 					<h1>{selectedEstante.nombre}</h1>
 					<p class="detail-meta">
 						{selectedEstante.filas} × {selectedEstante.columnas} · {activeUbicaciones.length} ubicaciones
+						{#if selectedEstante.deposito_nombre}
+							· {selectedEstante.deposito_nombre}
+						{/if}
 					</p>
 				</div>
 				<button class="button button--secondary" onclick={closeDetail}>Volver</button>
@@ -493,6 +538,13 @@
 
 			<label class="field-label" for="create-columnas">Columnas</label>
 			<input id="create-columnas" class="field-input" type="number" bind:value={createColumnas} min="1" max="50" />
+
+			<label class="field-label" for="create-deposito">Depósito</label>
+			<select id="create-deposito" class="field-input field-input--select" bind:value={createDepositoId}>
+				{#each depositos as deposito}
+					<option value={deposito.id}>{deposito.nombre}</option>
+				{/each}
+			</select>
 
 			<p class="qr-preview qr-preview--standalone">
 				{qrPreview(createNombre || 'Nombre', Number(createFilas) || 1, Number(createColumnas) || 1)}
@@ -987,6 +1039,14 @@
 	.field-input:disabled {
 		background-color: #f1f5f9;
 		color: #64748b;
+	}
+
+	.field-input--select {
+		appearance: none;
+		background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%23475569' viewBox='0 0 16 16'%3E%3Cpath d='M1.646 4.646a.5.5 0 0 1 .708 0L8 10.293l5.646-5.647a.5.5 0 0 1 .708.708l-6 6a.5.5 0 0 1-.708 0l-6-6a.5.5 0 0 1 0-.708z'/%3E%3C/svg%3E");
+		background-repeat: no-repeat;
+		background-position: right 0.75rem center;
+		padding-right: 2.5rem;
 	}
 
 	.hint {

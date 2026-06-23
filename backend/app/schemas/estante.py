@@ -6,11 +6,17 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 
+class DepositoResponse(BaseModel):
+    id: int
+    nombre: str
+
+
 class EstanteCreate(BaseModel):
     nombre: str = Field(..., min_length=1, max_length=50)
     orden_visual: int = 0
     filas: int = Field(..., ge=1, le=50)
     columnas: int = Field(..., ge=1, le=50)
+    deposito_id: Optional[int] = None
 
 
 class EstanteUpdate(BaseModel):
@@ -25,6 +31,8 @@ class EstanteResponse(BaseModel):
     orden_visual: int
     filas: int
     columnas: int
+    deposito_id: Optional[int] = None
+    deposito_nombre: Optional[str] = None
     deleted_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     ubicaciones_count: int = 0

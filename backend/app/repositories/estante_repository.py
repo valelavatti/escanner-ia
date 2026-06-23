@@ -11,21 +11,47 @@ import aiosqlite
 from app.repositories import ubicacion_repository
 
 
-async def list_estantes(db: aiosqlite.Connection, include_deleted: bool = False) -> list[dict]:
-    """Return all estantes ordered by visual order, optionally including soft-deleted ones."""
+async def list_depositos(db: aiosqlite.Connection) -> list[dict]:
+    """Return all depositos ordered by name."""
+    async with db.execute(
+        "SELECT id, nombre FROM depositos ORDER BY nombre"
+    ) as cursor:
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+
+async def list_estantes(
+    db: aiosqlite.Connection,
+    include_deleted: bool = False,
+    deposito_id: Optional[int] = None,
+) -> list[dict]:
+    """Return all estantes ordered by visual order, optionally including soft-deleted ones.
+
+    Filters by deposito_id when provided.
+    """
     sql = """
         SELECT e.*,
+               d.nombre AS deposito_nombre,
                (SELECT COUNT(*) FROM ubicaciones u WHERE u.estante_id = e.id) AS ubicaciones_count
         FROM estantes e
+        LEFT JOIN depositos d ON d.id = e.deposito_id
     """
-    params: tuple = ()
+    params: list = []
+    conditions: list[str] = []
 
     if not include_deleted:
-        sql += " WHERE e.deleted_at IS NULL"
+        conditions.append("e.deleted_at IS NULL")
+
+    if deposito_id is not None:
+        conditions.append("e.deposito_id = ?")
+        params.append(deposito_id)
+
+    if conditions:
+        sql += " WHERE " + " AND ".join(conditions)
 
     sql += " ORDER BY e.orden_visual, e.id"
 
-    async with db.execute(sql, params) as cursor:
+    async with db.execute(sql, tuple(params)) as cursor:
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
 
@@ -33,7 +59,12 @@ async def list_estantes(db: aiosqlite.Connection, include_deleted: bool = False)
 async def get_estante_by_id(db: aiosqlite.Connection, estante_id: int) -> Optional[dict]:
     """Return a non-deleted estante by id, or None."""
     async with db.execute(
-        "SELECT * FROM estantes WHERE id = ? AND deleted_at IS NULL",
+        """
+        SELECT e.*, d.nombre AS deposito_nombre
+        FROM estantes e
+        LEFT JOIN depositos d ON d.id = e.deposito_id
+        WHERE e.id = ? AND e.deleted_at IS NULL
+        """,
         (estante_id,),
     ) as cursor:
         row = await cursor.fetchone()
@@ -63,6 +94,7 @@ async def create_estante(
     orden_visual: int,
     filas: int,
     columnas: int,
+    deposito_id: Optional[int] = None,
 ) -> int:
     """Insert a new estante and auto-generate its ubicaciones.
 
@@ -73,10 +105,10 @@ async def create_estante(
         await db.execute("BEGIN")
         cursor = await db.execute(
             """
-            INSERT INTO estantes (nombre, orden_visual, filas, columnas)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO estantes (nombre, orden_visual, filas, columnas, deposito_id)
+            VALUES (?, ?, ?, ?, ?)
             """,
-            (nombre, orden_visual, filas, columnas),
+            (nombre, orden_visual, filas, columnas, deposito_id),
         )
         estante_id = cursor.lastrowid
         await ubicacion_repository.auto_generate_ubicaciones(

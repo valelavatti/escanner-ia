@@ -6,12 +6,13 @@
 	import { scannerState, anchoredLocation, type AnchoredLocation } from '$lib/stores/scanner';
 	import {
 		listEstantes,
+		listDepositos,
 		getEstanteUbicaciones,
 		lookupSector,
 		getProductoByBarcodeWithStock,
 		createMovimiento
 	} from '$lib/api/client';
-	import type { Estante, Ubicacion, ProductWithUbicacionStock } from '$lib/api/client';
+	import type { Estante, Deposito, Ubicacion, ProductWithUbicacionStock } from '$lib/api/client';
 
 	interface LastScan {
 		text: string;
@@ -43,6 +44,8 @@
 	let errorFlashTimeout: ReturnType<typeof setTimeout> | null = null;
 
 	let showLocationModal = $state(false);
+	let depositos = $state<Deposito[]>([]);
+	let selectedDepositoId = $state<number | null>(null);
 	let estantes = $state<Estante[]>([]);
 	let selectedEstanteId = $state<number | null>(null);
 	let ubicaciones = $state<Ubicacion[]>([]);
@@ -219,11 +222,17 @@
 
 	async function loadEstantes() {
 		try {
-			const rows = await listEstantes();
+			if (depositos.length === 0) {
+				depositos = await listDepositos();
+			}
+			const rows = await listEstantes(false, selectedDepositoId);
 			estantes = rows.filter((e) => !e.deleted_at);
-			if (estantes.length > 0 && selectedEstanteId == null) {
+			if (estantes.length > 0 && !estantes.some((e) => e.id === selectedEstanteId)) {
 				selectedEstanteId = estantes[0].id;
 				await loadUbicaciones();
+			} else if (estantes.length === 0) {
+				selectedEstanteId = null;
+				ubicaciones = [];
 			}
 		} catch (err) {
 			console.error(err);
@@ -238,6 +247,14 @@
 		} finally {
 			loadingLocations = false;
 		}
+	}
+
+	function handleDepositoChange(event: Event) {
+		const value = (event.target as HTMLSelectElement).value;
+		selectedDepositoId = value === '' ? null : Number(value);
+		selectedEstanteId = null;
+		ubicaciones = [];
+		loadEstantes();
 	}
 
 	function handleEstanteChange(event: Event) {
@@ -375,14 +392,24 @@
 			{#if estantes.length === 0}
 				<p>Cargando estantes...</p>
 			{:else}
-				<label class="modal__field">
-					Estante
-					<select value={selectedEstanteId ?? ''} onchange={handleEstanteChange}>
-						{#each estantes as estante}
-							<option value={estante.id}>{estante.nombre}</option>
-						{/each}
-					</select>
-				</label>
+			<label class="modal__field">
+				Depósito
+				<select value={selectedDepositoId ?? ''} onchange={handleDepositoChange}>
+					<option value="">Todos</option>
+					{#each depositos as deposito}
+						<option value={deposito.id}>{deposito.nombre}</option>
+					{/each}
+				</select>
+			</label>
+
+			<label class="modal__field">
+				Estante
+				<select value={selectedEstanteId ?? ''} onchange={handleEstanteChange}>
+					{#each estantes as estante}
+						<option value={estante.id}>{estante.nombre}</option>
+					{/each}
+				</select>
+			</label>
 
 				<label class="modal__field">
 					Ubicación
