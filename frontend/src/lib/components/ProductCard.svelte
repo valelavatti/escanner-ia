@@ -18,6 +18,7 @@
 
 	const currentStock = $derived(product.ubicacion_stock?.stock_actual ?? 0);
 	const isAssigned = $derived(product.ubicacion_stock?.is_assigned ?? false);
+	const existingProductoSku = $derived(product.ubicacion_stock?.existing_producto_sku ?? null);
 </script>
 
 <div class="product-card">
@@ -29,6 +30,13 @@
 	</div>
 
 	<div class="product-card__desc">{product.descripcion}</div>
+
+	{#if existingProductoSku}
+		<div class="product-card__warning" role="alert">
+			⚠️ Esta ubicación ya tiene otro producto: <strong>{existingProductoSku}</strong>.
+			Al guardar, se reasignará al nuevo producto y el stock arrancará desde 0.
+		</div>
+	{/if}
 
 	<div class="product-card__stock" class:product-card__stock--new={!isAssigned}>
 		Stock actual: {currentStock}
@@ -108,5 +116,16 @@
 	.product-card__stock--new {
 		color: #1e40af;
 		background-color: #dbeafe;
+	}
+
+	.product-card__warning {
+		padding: 0.75rem 1rem;
+		font-size: 0.875rem;
+		font-weight: 600;
+		line-height: 1.4;
+		color: #92400e;
+		background-color: #fef3c7;
+		border: 1px solid #fcd34d;
+		border-radius: 0.5rem;
 	}
 </style>

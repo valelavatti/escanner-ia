@@ -19,6 +19,7 @@ def _product_out(row: dict, ubicacion_stock: dict | None = None) -> ProductOut:
             ubicacion_id=ubicacion_stock["ubicacion_id"],
             stock_actual=ubicacion_stock["stock_actual"],
             is_assigned=ubicacion_stock["is_assigned"],
+            existing_producto_sku=ubicacion_stock.get("existing_producto_sku"),
         )
     return ProductOut(
         sku=row["sku"],

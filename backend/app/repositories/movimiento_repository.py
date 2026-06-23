@@ -82,11 +82,15 @@ async def _get_stock_anterior(
 
     row = await _fetch_one_row(
         db,
-        "SELECT stock_actual FROM ubicaciones WHERE id = ?",
+        "SELECT producto_id, stock_actual FROM ubicaciones WHERE id = ?",
         (ubicacion_id,),
     )
     if row is None:
         raise UbicacionNotFoundError(f"Ubicacion {ubicacion_id} no encontrada")
+    # If the location has a DIFFERENT product assigned, this is a reassignment —
+    # stock starts fresh at 0 for the new product.
+    if row["producto_id"] and row["producto_id"] != producto_sku:
+        return 0
     return int(row["stock_actual"])
 
 
@@ -181,13 +185,13 @@ async def _create_movimiento_once(
                 """,
                 (stock_nuevo, ubicacion_id),
             )
-            # Auto-assign product on first scan if the cell is empty.
-            if ubicacion["producto_id"] is None:
+            # Auto-assign or reassign product on scan.
+            if ubicacion["producto_id"] is None or ubicacion["producto_id"] != producto_sku:
                 await db.execute(
                     """
                     UPDATE ubicaciones
                     SET producto_id = ?, updated_at = CURRENT_TIMESTAMP
-                    WHERE id = ? AND producto_id IS NULL
+                    WHERE id = ?
                     """,
                     (producto_sku, ubicacion_id),
                 )
@@ -314,15 +318,24 @@ async def get_producto_ubicacion_stock(
 
     if es_suelto:
         is_assigned = True
+        existing_producto_sku = None
     else:
         is_assigned = ubicacion["producto_id"] == producto_sku
         if not is_assigned:
             stock = 0
+        # If the location has a different product, return its SKU so the
+        # frontend can warn the user before reassigning.
+        existing_producto_sku = (
+            ubicacion["producto_id"]
+            if ubicacion["producto_id"] and ubicacion["producto_id"] != producto_sku
+            else None
+        )
 
     return {
         "stock_actual": stock,
         "is_assigned": is_assigned,
         "es_suelto": es_suelto,
+        "existing_producto_sku": existing_producto_sku,
     }
 
 

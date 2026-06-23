@@ -12,6 +12,10 @@ class UbicacionStockInfo(BaseModel):
     ubicacion_id: int
     stock_actual: int
     is_assigned: bool
+    existing_producto_sku: Optional[str] = Field(
+        default=None,
+        description="If the location already has a different product, its SKU",
+    )
 
 
 class ProductOut(BaseModel):
