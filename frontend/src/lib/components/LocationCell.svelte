@@ -3,10 +3,11 @@
 
 	interface Props {
 		ubicacion: Ubicacion;
+		isSelected?: boolean;
 		onClick?: (ubicacion: Ubicacion) => void;
 	}
 
-	let { ubicacion, onClick }: Props = $props();
+	let { ubicacion, isSelected = false, onClick }: Props = $props();
 
 	const LOW_STOCK_THRESHOLD = 10;
 
@@ -35,6 +36,7 @@
 	class:cell--empty={isEmpty}
 	class:cell--low-stock={isLowStock}
 	class:cell--suelto={isSuelto}
+	class:cell--selected={isSelected}
 	onclick={() => onClick?.(ubicacion)}
 	onkeydown={handleKeyDown}
 	role="button"
@@ -94,6 +96,14 @@
 		background-color: #dbeafe;
 		border-color: #93c5fd;
 		color: #1e3a8a;
+	}
+
+	.cell--selected {
+		position: relative;
+		z-index: 1;
+		border: 3px solid #2563eb;
+		transform: scale(1.05);
+		box-shadow: 0 4px 12px rgba(37, 99, 235, 0.35);
 	}
 
 	.cell__coords,

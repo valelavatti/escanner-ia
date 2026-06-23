@@ -5,10 +5,11 @@
 	interface Props {
 		depositos: Deposito[];
 		estantes: (Estante & { ubicaciones: Ubicacion[] })[];
+		selectedCellId?: number | null;
 		onCellClick?: (ubicacion: Ubicacion) => void;
 	}
 
-	let { depositos, estantes, onCellClick }: Props = $props();
+	let { depositos, estantes, selectedCellId = null, onCellClick }: Props = $props();
 
 	const sortedEstantes = $derived(
 		[...estantes].sort((a, b) => a.orden_visual - b.orden_visual)
@@ -38,7 +39,7 @@
 			<h2 class="deposito-section__title">{deposito.nombre}</h2>
 			<div class="deposito-section__shelves">
 				{#each estantesByDeposito[deposito.id] ?? [] as estante (estante.id)}
-					<ShelfGrid {estante} onCellClick={onCellClick} />
+					<ShelfGrid {estante} {selectedCellId} onCellClick={onCellClick} />
 				{/each}
 			</div>
 		</section>
@@ -49,7 +50,7 @@
 			<h2 class="deposito-section__title">Sin depósito</h2>
 			<div class="deposito-section__shelves">
 				{#each ungroupedEstantes as estante (estante.id)}
-					<ShelfGrid {estante} onCellClick={onCellClick} />
+					<ShelfGrid {estante} {selectedCellId} onCellClick={onCellClick} />
 				{/each}
 			</div>
 		</section>

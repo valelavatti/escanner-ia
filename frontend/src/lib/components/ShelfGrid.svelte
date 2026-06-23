@@ -4,10 +4,11 @@
 
 	interface Props {
 		estante: Estante & { ubicaciones: Ubicacion[] };
+		selectedCellId?: number | null;
 		onCellClick?: (ubicacion: Ubicacion) => void;
 	}
 
-	let { estante, onCellClick }: Props = $props();
+	let { estante, selectedCellId = null, onCellClick }: Props = $props();
 
 	const isSuelto = $derived(estante.nombre.toLowerCase().startsWith('suelto'));
 </script>
@@ -22,7 +23,7 @@
 		style="--cols: {estante.columnas}; --rows: {estante.filas};"
 	>
 		{#each estante.ubicaciones as ubicacion (ubicacion.id)}
-			<LocationCell {ubicacion} onClick={onCellClick} />
+			<LocationCell {ubicacion} isSelected={ubicacion.id === selectedCellId} onClick={onCellClick} />
 		{/each}
 	</div>
 </div>

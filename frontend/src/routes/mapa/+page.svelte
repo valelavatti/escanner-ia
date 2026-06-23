@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import WarehouseMap from '$lib/components/WarehouseMap.svelte';
+	import MapDetailPanel from '$lib/components/MapDetailPanel.svelte';
 	import { listDepositos, listEstantes, getEstante } from '$lib/api/client';
+	import { mapStore } from '$lib/stores/map';
 	import type { Deposito, Estante, Ubicacion } from '$lib/api/client';
 
 	type EstanteWithUbicaciones = Estante & { ubicaciones: Ubicacion[] };
@@ -10,6 +12,13 @@
 	let estantes = $state<EstanteWithUbicaciones[]>([]);
 	let loading = $state(true);
 	let error = $state('');
+
+	const selectedCellId = $derived($mapStore.selectedCellId);
+	const selectedUbicacion = $derived(
+		estantes
+			.flatMap((e) => e.ubicaciones)
+			.find((u) => u.id === selectedCellId)
+	);
 
 	async function loadMap() {
 		loading = true;
@@ -33,7 +42,16 @@
 				})
 			);
 
+			const ubicacionesByEstante = estantesWithUbicaciones.reduce<Record<number, Ubicacion[]>>(
+				(acc, estante) => {
+					acc[estante.id] = estante.ubicaciones;
+					return acc;
+				},
+				{}
+			);
+
 			estantes = estantesWithUbicaciones;
+			mapStore.update((s) => ({ ...s, estantes: estantesData, ubicaciones: ubicacionesByEstante }));
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Error al cargar el mapa';
 		} finally {
@@ -46,12 +64,18 @@
 	});
 
 	function handleCellClick(ubicacion: Ubicacion) {
-		// Interaction wired in Work Unit 13
-		console.log('LocationCell clicked:', ubicacion.qr_valor);
+		mapStore.update((s) => ({
+			...s,
+			selectedCellId: s.selectedCellId === ubicacion.id ? null : ubicacion.id
+		}));
+	}
+
+	function handleClosePanel() {
+		mapStore.update((s) => ({ ...s, selectedCellId: null }));
 	}
 </script>
 
-<div class="map-page">
+<div class="map-page" class:map-page--panel-open={selectedUbicacion}>
 	<header class="map-page__header">
 		<h1>Mapa visual</h1>
 		<p class="map-page__subtitle">Ubicaciones por depósito y estante</p>
@@ -62,6 +86,7 @@
 		<span class="legend__item">🟨 Stock bajo</span>
 		<span class="legend__item">⬜ Vacío</span>
 		<span class="legend__item">🔵 Suelto</span>
+		<span class="legend__item">🔵 Seleccionado</span>
 	</div>
 
 	{#if loading}
@@ -78,9 +103,18 @@
 			<p>No hay estantes configurados.</p>
 		</div>
 	{:else}
-		<WarehouseMap {depositos} {estantes} onCellClick={handleCellClick} />
+		<WarehouseMap
+			{depositos}
+			{estantes}
+			selectedCellId={selectedCellId ?? null}
+			onCellClick={handleCellClick}
+		/>
 	{/if}
 </div>
+
+{#if selectedUbicacion}
+	<MapDetailPanel selectedUbicacion={selectedUbicacion} onClose={handleClosePanel} />
+{/if}
 
 <style>
 	.map-page {
@@ -89,6 +123,10 @@
 		gap: 1rem;
 		padding-top: env(safe-area-inset-top);
 		padding-bottom: env(safe-area-inset-bottom);
+	}
+
+	.map-page--panel-open {
+		padding-bottom: calc(env(safe-area-inset-bottom) + 1rem);
 	}
 
 	.map-page__header {
