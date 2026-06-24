@@ -471,7 +471,7 @@
 			{:else}
 				<div
 					class="ubicaciones-grid"
-					style="grid-template-columns: repeat({selectedEstante.columnas}, minmax(48px, 1fr));"
+					style="grid-template-columns: repeat({selectedEstante.columnas}, minmax(72px, 1fr));"
 				>
 				{#each activeUbicaciones as ubicacion (ubicacion.id)}
 					<div class={cellClass(ubicacion)}>
@@ -809,6 +809,8 @@
 		min-height: 2.25rem;
 		padding: 0.375rem 0.75rem;
 		font-size: 0.875rem;
+		white-space: nowrap;
+		flex-shrink: 0;
 	}
 
 	.alert {
@@ -926,6 +928,7 @@
 		display: grid;
 		gap: 0.25rem;
 		overflow-x: auto;
+		-webkit-overflow-scrolling: touch;
 		padding-bottom: 0.5rem;
 		touch-action: manipulation;
 	}
@@ -937,11 +940,20 @@
 		justify-content: center;
 		gap: 0.125rem;
 		min-height: 5rem;
-		padding: 0.5rem;
+		min-width: 5rem;
+		padding: 0.5rem 0.25rem;
 		border-radius: 0.375rem;
 		font-size: 0.75rem;
 		text-align: center;
-		word-break: break-word;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.cell span {
+		max-width: 100%;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	.cell--empty {

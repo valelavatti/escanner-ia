@@ -72,11 +72,12 @@
 
 	.shelf__grid {
 		display: grid;
-		grid-template-columns: repeat(var(--cols), minmax(48px, 1fr));
-		grid-template-rows: repeat(var(--rows), minmax(48px, 1fr));
+		grid-template-columns: repeat(var(--cols), minmax(64px, 1fr));
+		grid-template-rows: repeat(var(--rows), minmax(64px, 1fr));
 		gap: 0.25rem;
 		width: 100%;
 		min-width: 0;
+		overflow-x: auto;
 		overflow-x: auto;
 		touch-action: pan-x;
 	}
