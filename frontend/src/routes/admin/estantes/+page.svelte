@@ -805,14 +805,6 @@
 		background-color: #b91c1c;
 	}
 
-	.button--small {
-		min-height: 2.25rem;
-		padding: 0.375rem 0.75rem;
-		font-size: 0.875rem;
-		white-space: nowrap;
-		flex-shrink: 0;
-	}
-
 	.alert {
 		margin-bottom: 1rem;
 		padding: 1rem;
@@ -940,13 +932,27 @@
 		justify-content: center;
 		gap: 0.125rem;
 		min-height: 5rem;
+		min-width: 0;
 		padding: 0.5rem 0.25rem;
 		border-radius: 0.375rem;
 		font-size: 0.75rem;
 		text-align: center;
+		overflow: hidden;
 	}
 
-	.cell span {
+	.cell > * {
+		max-width: 100%;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.button--small {
+		min-height: 2.25rem;
+		padding: 0.375rem 0.75rem;
+		font-size: 0.875rem;
+		white-space: nowrap;
+		flex-shrink: 0;
 		max-width: 100%;
 		overflow: hidden;
 		text-overflow: ellipsis;
