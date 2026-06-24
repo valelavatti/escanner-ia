@@ -353,6 +353,36 @@ async def get_stock_by_producto_in_ubicacion(
     return await _get_stock_anterior(db, producto_sku, ubicacion_id, es_suelto)
 
 
+async def get_producto_stock_total(db: aiosqlite.Connection, producto_sku: str) -> int:
+    """Return the total stock of a product across ALL ubicaciones.
+
+    For regular shelves: SUM(ubicaciones.stock_actual) WHERE producto_id = sku.
+    For Suelto: SUM(movimientos.cantidad) WHERE producto_id = sku AND estante is Suelto.
+    Combined = regular_sum + suelto_sum.
+    """
+    regular = await _fetch_one_row(
+        db,
+        "SELECT COALESCE(SUM(stock_actual), 0) AS total FROM ubicaciones WHERE producto_id = ?",
+        (producto_sku,),
+    )
+    regular_stock = int(regular["total"]) if regular else 0
+
+    suelto = await _fetch_one_row(
+        db,
+        """
+        SELECT COALESCE(SUM(m.cantidad), 0) AS total
+        FROM movimientos m
+        JOIN ubicaciones u ON u.id = m.ubicacion_id
+        JOIN estantes e ON e.id = u.estante_id
+        WHERE m.producto_id = ? AND e.nombre = 'Suelto'
+        """,
+        (producto_sku,),
+    )
+    suelto_stock = int(suelto["total"]) if suelto else 0
+
+    return regular_stock + suelto_stock
+
+
 async def list_movimientos(
     db: aiosqlite.Connection,
     filters: dict,

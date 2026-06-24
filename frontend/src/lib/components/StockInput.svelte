@@ -3,6 +3,7 @@
 		quantity: number;
 		mode: 'alta' | 'ajuste';
 		currentStock: number;
+		stockTotal: number;
 		isSaving: boolean;
 		onQuantityChange: (value: number) => void;
 		onModeChange: (mode: 'alta' | 'ajuste') => void;
@@ -10,8 +11,17 @@
 		onClose: () => void;
 	}
 
-	let { quantity, mode, currentStock, isSaving, onQuantityChange, onModeChange, onSave, onClose }: Props =
-		$props();
+	let {
+		quantity,
+		mode,
+		currentStock,
+		stockTotal,
+		isSaving,
+		onQuantityChange,
+		onModeChange,
+		onSave,
+		onClose
+	}: Props = $props();
 
 	function handleInput(event: Event) {
 		const target = event.target as HTMLInputElement;
@@ -20,6 +30,10 @@
 	}
 
 	const resultStock = $derived(mode === 'alta' ? currentStock + quantity : quantity);
+	const resultGeneral = $derived(
+		mode === 'alta' ? stockTotal + quantity : stockTotal - currentStock + quantity
+	);
+	const showResultGeneral = $derived(stockTotal > currentStock);
 	const canSave = $derived(!isSaving && Number.isFinite(quantity) && quantity >= 0);
 </script>
 
@@ -61,6 +75,12 @@
 	</label>
 
 	<div class="stock-input__preview">Stock resultante: {resultStock}</div>
+
+	{#if showResultGeneral}
+		<div class="stock-input__preview stock-input__preview--general">
+			Resultante general: {resultGeneral}
+		</div>
+	{/if}
 
 	<div class="stock-input__actions">
 		<button
@@ -157,6 +177,11 @@
 		color: #0f172a;
 		background-color: #e0f2fe;
 		border-radius: 0.5rem;
+	}
+
+	.stock-input__preview--general {
+		color: #4b5563;
+		background-color: #f3f4f6;
 	}
 
 	.stock-input__actions {

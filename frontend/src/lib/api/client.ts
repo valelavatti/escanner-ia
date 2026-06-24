@@ -195,6 +195,11 @@ export interface ProductWithUbicacionStock extends Product {
 	ubicacion_stock: UbicacionStockInfo | null;
 }
 
+export interface ProductoStockTotal {
+	sku: string;
+	stock_total: number;
+}
+
 export interface MovimientoCreate {
 	producto_sku: string;
 	ubicacion_id: number;
@@ -313,6 +318,12 @@ export async function getProductoByBarcodeWithStock(
 	} catch {
 		return null;
 	}
+}
+
+export async function getProductoStockTotal(sku: string): Promise<ProductoStockTotal> {
+	return api<ProductoStockTotal>(
+		`/productos/${encodeURIComponent(sku)}/stock-total?sku=${encodeURIComponent(sku)}`
+	);
 }
 
 export async function createMovimiento(data: MovimientoCreate): Promise<MovimientoResponse> {

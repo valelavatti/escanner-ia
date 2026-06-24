@@ -10,6 +10,7 @@
 		getEstanteUbicaciones,
 		lookupSector,
 		getProductoByBarcodeWithStock,
+		getProductoStockTotal,
 		createMovimiento
 	} from '$lib/api/client';
 	import type { Estante, Deposito, Ubicacion, ProductWithUbicacionStock } from '$lib/api/client';
@@ -29,6 +30,7 @@
 	let cameraError = $state('');
 	let lastScan = $state<LastScan | null>(null);
 	let scannedProduct = $state<ProductWithUbicacionStock | null>(null);
+	let stockTotal = $state(0);
 
 	let lastScannedCode = $state('');
 	let lastScannedTime = $state(0);
@@ -122,6 +124,14 @@
 			scannedProduct = product;
 			quantity = 0;
 			mode = 'alta';
+
+			try {
+				const stockInfo = await getProductoStockTotal(product.sku);
+				stockTotal = stockInfo.stock_total;
+			} catch {
+				stockTotal = 0;
+			}
+
 			showGreenFlash(`Producto: ${product.sku} — ${product.descripcion?.substring(0, 40) ?? ''}`);
 		} catch (err) {
 			showError(`Error al buscar producto: ${barcode}`);
@@ -132,6 +142,7 @@
 
 	function clearScannedProduct() {
 		scannedProduct = null;
+		stockTotal = 0;
 		quantity = 0;
 		mode = 'alta';
 	}
@@ -170,6 +181,7 @@
 				};
 			}
 
+			stockTotal += response.stock_nuevo - response.stock_anterior;
 			quantity = 0;
 			scannerRef?.resume();
 		} catch (err) {
@@ -352,6 +364,7 @@
 	{#if scannedProduct}
 		<ProductCard
 			product={scannedProduct}
+			{stockTotal}
 			{quantity}
 			{mode}
 			{isSaving}

@@ -4,6 +4,7 @@
 
 	interface Props {
 		product: ProductWithUbicacionStock;
+		stockTotal: number;
 		quantity: number;
 		mode: 'alta' | 'ajuste';
 		isSaving: boolean;
@@ -13,12 +14,22 @@
 		onClose: () => void;
 	}
 
-	let { product, quantity, mode, isSaving, onQuantityChange, onModeChange, onSave, onClose }: Props =
-		$props();
+	let {
+		product,
+		stockTotal,
+		quantity,
+		mode,
+		isSaving,
+		onQuantityChange,
+		onModeChange,
+		onSave,
+		onClose
+	}: Props = $props();
 
 	const currentStock = $derived(product.ubicacion_stock?.stock_actual ?? 0);
 	const isAssigned = $derived(product.ubicacion_stock?.is_assigned ?? false);
 	const existingProductoSku = $derived(product.ubicacion_stock?.existing_producto_sku ?? null);
+	const showStockGeneral = $derived(stockTotal > currentStock);
 </script>
 
 <div class="product-card">
@@ -42,10 +53,17 @@
 		Stock actual: {currentStock}
 	</div>
 
+	{#if showStockGeneral}
+		<div class="product-card__stock product-card__stock--general">
+			Stock general: {stockTotal}
+		</div>
+	{/if}
+
 	<StockInput
 		{quantity}
 		{mode}
 		{currentStock}
+		{stockTotal}
 		{isSaving}
 		{onQuantityChange}
 		{onModeChange}
@@ -116,6 +134,11 @@
 	.product-card__stock--new {
 		color: #1e40af;
 		background-color: #dbeafe;
+	}
+
+	.product-card__stock--general {
+		color: #4b5563;
+		background-color: #f3f4f6;
 	}
 
 	.product-card__warning {

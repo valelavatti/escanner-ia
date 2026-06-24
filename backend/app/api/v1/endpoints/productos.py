@@ -43,6 +43,28 @@ async def list_productos(
     return ProductSearchResponse(items=items, total=len(items))
 
 
+@router.get("/{codigo_de_barra}/stock-total", response_model=dict)
+async def get_producto_stock_total(
+    codigo_de_barra: str,
+    sku: str = Query(None, description="SKU del producto (si ya se conoce)"),
+    db: aiosqlite.Connection = Depends(get_db),
+    user: UsuarioResponse = Depends(get_current_user),
+):
+    """Return the total stock of a product across all ubicaciones."""
+    if sku:
+        total = await movimiento_repository.get_producto_stock_total(db, sku)
+        return {"sku": sku, "stock_total": total}
+
+    row = await producto_repository.get_producto_by_codigo(db, codigo_de_barra)
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Producto no encontrado",
+        )
+    total = await movimiento_repository.get_producto_stock_total(db, row["sku"])
+    return {"sku": row["sku"], "stock_total": total}
+
+
 @router.get("/{codigo_de_barra}", response_model=ProductOut)
 async def get_producto_by_barcode(
     codigo_de_barra: str,
