@@ -469,9 +469,10 @@
 			{#if loading}
 				<p class="loading">Cargando ubicaciones…</p>
 			{:else}
+			<div class="ubicaciones-grid-wrapper">
 				<div
 					class="ubicaciones-grid"
-					style="grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));"
+					style="grid-template-columns: repeat({selectedEstante.columnas}, minmax(130px, 1fr));"
 				>
 				{#each activeUbicaciones as ubicacion (ubicacion.id)}
 					<div class={cellClass(ubicacion)}>
@@ -503,6 +504,7 @@
 					</div>
 				{/each}
 				</div>
+			</div>
 			{/if}
 		</div>
 	{/if}
@@ -916,12 +918,16 @@
 		margin: 0.25rem 0 0;
 	}
 
+	.ubicaciones-grid-wrapper {
+		overflow-x: auto;
+		-webkit-overflow-scrolling: touch;
+		padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0));
+	}
+
 	.ubicaciones-grid {
 		display: grid;
 		gap: 0.25rem;
-		overflow-x: auto;
-		-webkit-overflow-scrolling: touch;
-		padding-bottom: 0.5rem;
+		min-width: max-content;
 		touch-action: manipulation;
 	}
 
@@ -933,14 +939,15 @@
 		gap: 0.125rem;
 		min-height: 5rem;
 		min-width: 0;
-		padding: 0.5rem 0.25rem;
+		padding: 0.5rem;
 		border-radius: 0.375rem;
 		font-size: 0.75rem;
 		text-align: center;
 		overflow: hidden;
 	}
 
-	.cell > * {
+	/* Text elements can be truncated gracefully; buttons must remain fully readable. */
+	.cell span {
 		max-width: 100%;
 		overflow: hidden;
 		text-overflow: ellipsis;
@@ -953,9 +960,6 @@
 		font-size: 0.875rem;
 		white-space: nowrap;
 		flex-shrink: 0;
-		max-width: 100%;
-		overflow: hidden;
-		text-overflow: ellipsis;
 	}
 
 	.cell--empty {
