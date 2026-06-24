@@ -9,6 +9,8 @@ from typing import Optional
 
 import aiosqlite
 
+from app.repositories import movimiento_repository as _mov_repo
+
 
 class UbicacionOcupadaError(Exception):
     """Raised when trying to assign a product to a ubicacion that already has one."""
@@ -194,13 +196,16 @@ async def assign_producto_to_ubicacion(
     )
 
     # Append-only audit record for the assignment (no stock change).
+    stock_general = await _mov_repo.get_producto_stock_total(db, producto_id)
     await db.execute(
         """
         INSERT INTO movimientos
-            (usuario_id, producto_id, ubicacion_id, cantidad, stock_anterior, stock_nuevo, tipo)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+            (usuario_id, producto_id, ubicacion_id, cantidad, stock_anterior, stock_nuevo, tipo,
+             stock_general_anterior, stock_general_nuevo)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (usuario_id, producto_id, ubicacion_id, 0, 0, 0, "asignacion"),
+        (usuario_id, producto_id, ubicacion_id, 0, 0, 0, "asignacion",
+         stock_general, stock_general),
     )
 
     await db.commit()
@@ -241,13 +246,16 @@ async def unassign_producto_from_ubicacion(
 
     # Append-only audit record for the removal (stock conceptually reset to 0).
     if old_producto_id is not None:
+        stock_general = await _mov_repo.get_producto_stock_total(db, old_producto_id)
         await db.execute(
             """
             INSERT INTO movimientos
-                (usuario_id, producto_id, ubicacion_id, cantidad, stock_anterior, stock_nuevo, tipo)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                (usuario_id, producto_id, ubicacion_id, cantidad, stock_anterior, stock_nuevo, tipo,
+                 stock_general_anterior, stock_general_nuevo)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (usuario_id, old_producto_id, ubicacion_id, 0, stock_anterior, 0, "desasignacion"),
+            (usuario_id, old_producto_id, ubicacion_id, 0, stock_anterior, 0, "desasignacion",
+             stock_general, stock_general),
         )
 
     await db.commit()

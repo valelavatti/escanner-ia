@@ -140,6 +140,10 @@ async def _create_movimiento_once(
             raise UbicacionNotFoundError(f"Ubicacion {ubicacion_id} no encontrada")
 
         es_suelto = ubicacion["estante_nombre"] == "Suelto"
+
+        # Snapshot the product's general stock BEFORE any changes in this TX.
+        stock_general_anterior = await get_producto_stock_total(db, producto_sku)
+
         # Read stock inside the transaction so concurrent writers serialize
         # and the second movement sees the updated stock from the first.
         stock_anterior = await _get_stock_anterior(db, producto_sku, ubicacion_id, es_suelto)
@@ -168,29 +172,42 @@ async def _create_movimiento_once(
             await db.execute(
                 """
                 INSERT INTO movimientos (usuario_id, producto_id, ubicacion_id,
-                    cantidad, stock_anterior, stock_nuevo, tipo)
-                VALUES (?, ?, ?, 0, ?, 0, 'desasignacion')
+                    cantidad, stock_anterior, stock_nuevo, tipo,
+                    stock_general_anterior, stock_general_nuevo)
+                VALUES (?, ?, ?, 0, ?, 0, 'desasignacion', ?, ?)
                 """,
-                (usuario_id, old_producto_id, ubicacion_id, ubicacion["stock_actual"]),
+                (
+                    usuario_id, old_producto_id, ubicacion_id,
+                    ubicacion["stock_actual"],
+                    stock_general_anterior, stock_general_anterior,
+                ),
             )
 
         if is_new_assignment or is_reassignment:
             await db.execute(
                 """
                 INSERT INTO movimientos (usuario_id, producto_id, ubicacion_id,
-                    cantidad, stock_anterior, stock_nuevo, tipo)
-                VALUES (?, ?, ?, 0, 0, 0, 'asignacion')
+                    cantidad, stock_anterior, stock_nuevo, tipo,
+                    stock_general_anterior, stock_general_nuevo)
+                VALUES (?, ?, ?, 0, 0, 0, 'asignacion', ?, ?)
                 """,
-                (usuario_id, producto_sku, ubicacion_id),
+                (
+                    usuario_id, producto_sku, ubicacion_id,
+                    stock_general_anterior, stock_general_anterior,
+                ),
             )
+
+        # Calculate stock general after the stock change.
+        stock_general_nuevo = stock_general_anterior + (stock_nuevo - stock_anterior)
 
         # Insert the immutable audit record for the stock change.
         cursor = await db.execute(
             """
             INSERT INTO movimientos
                 (usuario_id, producto_id, ubicacion_id, cantidad,
-                 stock_anterior, stock_nuevo, tipo)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                 stock_anterior, stock_nuevo, tipo,
+                 stock_general_anterior, stock_general_nuevo)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 usuario_id,
@@ -200,6 +217,8 @@ async def _create_movimiento_once(
                 stock_anterior,
                 stock_nuevo,
                 tipo,
+                stock_general_anterior,
+                stock_general_nuevo,
             ),
         )
         movimiento_id = cursor.lastrowid
@@ -302,6 +321,8 @@ async def get_movimiento_by_id(db: aiosqlite.Connection, movimiento_id: int) -> 
             m.cantidad,
             m.stock_anterior,
             m.stock_nuevo,
+            m.stock_general_anterior,
+            m.stock_general_nuevo,
             m.timestamp,
             m.tipo
         FROM movimientos m
@@ -473,6 +494,8 @@ async def list_movimientos(
             m.cantidad,
             m.stock_anterior,
             m.stock_nuevo,
+            m.stock_general_anterior,
+            m.stock_general_nuevo,
             m.timestamp,
             m.tipo
         FROM movimientos m
@@ -528,6 +551,8 @@ async def export_movimientos_csv(db: aiosqlite.Connection, filters: dict) -> str
             m.cantidad,
             m.stock_anterior,
             m.stock_nuevo,
+            m.stock_general_anterior,
+            m.stock_general_nuevo,
             m.timestamp AS fecha_hora,
             m.tipo
         FROM movimientos m

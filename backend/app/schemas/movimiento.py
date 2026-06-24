@@ -37,7 +37,8 @@ class MovimientoResponse(BaseModel):
     stock_nuevo: int
     timestamp: datetime
     tipo: str
-    producto_stock_total: int = Field(default=0, description="Stock general actual del producto en todas las ubicaciones")
+    stock_general_anterior: int = Field(default=0, description="Stock general del producto ANTES de este movimiento")
+    stock_general_nuevo: int = Field(default=0, description="Stock general del producto DESPUES de este movimiento")
 
 
 class MovimientoListResponse(BaseModel):

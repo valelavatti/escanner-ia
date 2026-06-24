@@ -20,6 +20,7 @@ MIGRATIONS: list[tuple[int, str, str]] = [
     (5, "create_depositos", _load_migration("005_create_depositos.sql")),
     (6, "seed_deposito_central", _load_migration("006_seed_deposito_central.sql")),
     (7, "extend_movimientos_tipos", _load_migration("007_extend_movimientos_tipos.sql")),
+    (8, "add_stock_general_columns", _load_migration("008_add_stock_general_columns.sql")),
 ]
 
 

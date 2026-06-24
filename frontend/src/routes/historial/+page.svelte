@@ -220,8 +220,9 @@
 	}
 
 	function formatStockGeneral(m: MovimientoResponse): string | null {
-		if (!m.producto_sku || m.producto_stock_total == null) return null;
-		return `Stock general: ${m.producto_stock_total}`;
+		if (!m.producto_sku || m.tipo === 'asignacion' || m.tipo === 'desasignacion') return null;
+		if (m.stock_general_anterior === m.stock_general_nuevo) return null;
+		return `Stock general: ${m.stock_general_anterior} → ${m.stock_general_nuevo}`;
 	}
 
 	function formatUbicacion(m: MovimientoResponse): string {

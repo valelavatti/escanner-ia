@@ -19,7 +19,7 @@ from app.schemas.movimiento import (
 router = APIRouter()
 
 
-def _movimiento_response(row: dict, stock_total: int = 0) -> MovimientoResponse:
+def _movimiento_response(row: dict) -> MovimientoResponse:
     return MovimientoResponse(
         id=row["id"],
         usuario_id=row["usuario_id"],
@@ -36,7 +36,8 @@ def _movimiento_response(row: dict, stock_total: int = 0) -> MovimientoResponse:
         stock_nuevo=row["stock_nuevo"],
         timestamp=row["timestamp"],
         tipo=row["tipo"],
-        producto_stock_total=stock_total,
+        stock_general_anterior=row.get("stock_general_anterior", 0),
+        stock_general_nuevo=row.get("stock_general_nuevo", 0),
     )
 
 
@@ -112,12 +113,8 @@ async def list_movimientos(
         "offset": offset,
     }
     rows, total = await movimiento_repository.list_movimientos(db, filters)
-    # Batch-fetch current stock totals for each unique product in this page.
-    stocks: dict[str, int] = {}
-    for sku in {r["producto_sku"] for r in rows if r.get("producto_sku")}:
-        stocks[sku] = await movimiento_repository.get_producto_stock_total(db, sku)
     return MovimientoListResponse(
-        items=[_movimiento_response(row, stocks.get(row.get("producto_sku", ""), 0)) for row in rows],
+        items=[_movimiento_response(row) for row in rows],
         total=total,
     )
 
