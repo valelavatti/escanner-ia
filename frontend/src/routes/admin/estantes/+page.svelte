@@ -471,7 +471,7 @@
 			{:else}
 				<div
 					class="ubicaciones-grid"
-					style="grid-template-columns: repeat({selectedEstante.columnas}, minmax(72px, 1fr));"
+					style="grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));"
 				>
 				{#each activeUbicaciones as ubicacion (ubicacion.id)}
 					<div class={cellClass(ubicacion)}>
@@ -940,20 +940,16 @@
 		justify-content: center;
 		gap: 0.125rem;
 		min-height: 5rem;
-		min-width: 5rem;
 		padding: 0.5rem 0.25rem;
 		border-radius: 0.375rem;
 		font-size: 0.75rem;
 		text-align: center;
-		overflow: hidden;
-		text-overflow: ellipsis;
 	}
 
 	.cell span {
 		max-width: 100%;
 		overflow: hidden;
 		text-overflow: ellipsis;
-		white-space: nowrap;
 	}
 
 	.cell--empty {
