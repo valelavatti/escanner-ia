@@ -8,8 +8,11 @@
 		onAssign: () => void;
 		onChange: () => void;
 		onUnassign: () => void;
+		onConfirmUnassign: () => void;
+		onCancelUnassign: () => void;
 		loadingAction?: 'assign' | 'change' | 'unassign' | null;
 		actionError?: string | null;
+		confirmingUnassign?: boolean;
 	}
 
 	let {
@@ -18,8 +21,11 @@
 		onAssign,
 		onChange,
 		onUnassign,
+		onConfirmUnassign,
+		onCancelUnassign,
 		loadingAction = null,
-		actionError = null
+		actionError = null,
+		confirmingUnassign = false
 	}: Props = $props();
 	let visible = $state(false);
 
@@ -69,24 +75,51 @@
 					Stock actual: {selectedUbicacion.stock_actual}
 				</div>
 			</div>
-			<div class="detail-panel__actions">
-				<button
-					type="button"
-					class="button button--primary"
-					onclick={onChange}
-					disabled={loadingAction === 'change'}
-				>
-					{loadingAction === 'change' ? 'Cambiando...' : 'Cambiar producto'}
-				</button>
-				<button
-					type="button"
-					class="button button--danger-outline"
-					onclick={onUnassign}
-					disabled={loadingAction === 'unassign'}
-				>
-					{loadingAction === 'unassign' ? 'Desasignando...' : 'Desasignar'}
-				</button>
-			</div>
+
+			{#if confirmingUnassign}
+				<div class="detail-panel__confirm">
+					<p class="detail-panel__confirm-text">
+						¿Quitar <strong>{selectedUbicacion.producto_sku}</strong> de {selectedUbicacion.estante_nombre} {selectedUbicacion.qr_valor}?
+					</p>
+					<div class="detail-panel__confirm-actions">
+						<button
+							type="button"
+							class="button button--danger"
+							onclick={onConfirmUnassign}
+							disabled={loadingAction === 'unassign'}
+						>
+							{loadingAction === 'unassign' ? 'Quitando...' : 'Sí, quitar'}
+						</button>
+						<button
+							type="button"
+							class="button button--secondary"
+							onclick={onCancelUnassign}
+							disabled={loadingAction === 'unassign'}
+						>
+							Cancelar
+						</button>
+					</div>
+				</div>
+			{:else}
+				<div class="detail-panel__actions">
+					<button
+						type="button"
+						class="button button--primary"
+						onclick={onChange}
+						disabled={loadingAction !== null}
+					>
+						{loadingAction === 'change' ? 'Cambiando...' : 'Cambiar producto'}
+					</button>
+					<button
+						type="button"
+						class="button button--danger-outline"
+						onclick={onUnassign}
+						disabled={loadingAction !== null}
+					>
+						Desasignar
+					</button>
+				</div>
+			{/if}
 			{#if actionError}
 				<p class="detail-panel__error" role="alert">{actionError}</p>
 			{/if}
@@ -269,6 +302,38 @@
 		color: #dc2626;
 		background-color: #ffffff;
 		border: 1px solid #dc2626;
+	}
+
+	.button--danger {
+		color: #ffffff;
+		background-color: #dc2626;
+		border: 1px solid #dc2626;
+	}
+
+	.button--secondary {
+		color: #334155;
+		background-color: #f1f5f9;
+		border: 1px solid #cbd5e1;
+	}
+
+	.detail-panel__confirm {
+		margin-top: 1rem;
+		padding: 0.75rem;
+		background-color: #fef3c7;
+		border: 1px solid #fcd34d;
+		border-radius: 0.5rem;
+	}
+
+	.detail-panel__confirm-text {
+		margin: 0 0 0.75rem;
+		font-size: 0.9375rem;
+		color: #92400e;
+		line-height: 1.5;
+	}
+
+	.detail-panel__confirm-actions {
+		display: flex;
+		gap: 0.5rem;
 	}
 
 	@media (min-width: 768px) {

@@ -26,6 +26,7 @@
 
 	let actionLoading = $state<ActionType | null>(null);
 	let actionError = $state<string | null>(null);
+	let confirmingUnassign = $state(false);
 
 	let searchModalOpen = $state(false);
 	let searchModalMode = $state<ActionType>('assign');
@@ -88,11 +89,13 @@
 			...s,
 			selectedCellId: s.selectedCellId === ubicacion.id ? null : ubicacion.id
 		}));
+		confirmingUnassign = false;
 		clearActionError();
 	}
 
 	function handleClosePanel() {
 		mapStore.update((s) => ({ ...s, selectedCellId: null }));
+		confirmingUnassign = false;
 		clearActionError();
 	}
 
@@ -203,16 +206,18 @@
 
 	async function handleUnassign() {
 		if (!selectedUbicacion?.producto_sku) return;
-		const confirmed = window.confirm(
-			`¿Quitar ${selectedUbicacion.producto_sku} - ${selectedUbicacion.producto_descripcion || ''} de ${selectedUbicacion.estante_nombre} ${selectedUbicacion.qr_valor}?`
-		);
-		if (!confirmed) return;
+		confirmingUnassign = true;
+	}
+
+	async function handleConfirmUnassign() {
+		if (!selectedUbicacion?.producto_sku) return;
 
 		actionLoading = 'unassign';
 		clearActionError();
 		try {
 			await unassignProductFromUbicacion(selectedUbicacion.id);
 			await refreshEstante(selectedUbicacion.estante_id);
+			confirmingUnassign = false;
 		} catch (err) {
 			actionError = formatActionError(
 				err,
@@ -222,6 +227,11 @@
 		} finally {
 			actionLoading = null;
 		}
+	}
+
+	function handleCancelUnassign() {
+		confirmingUnassign = false;
+		clearActionError();
 	}
 
 	async function handleSelectProduct(product: ProductSearchResult) {
@@ -289,8 +299,11 @@
 		onAssign={() => openSearchModal('assign')}
 		onChange={() => openSearchModal('change')}
 		onUnassign={handleUnassign}
+		onConfirmUnassign={handleConfirmUnassign}
+		onCancelUnassign={handleCancelUnassign}
 		loadingAction={actionLoading}
 		actionError={actionError}
+		confirmingUnassign={confirmingUnassign}
 	/>
 {/if}
 
