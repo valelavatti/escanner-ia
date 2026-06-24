@@ -481,7 +481,7 @@ async def list_movimientos(
         JOIN ubicaciones ubi ON ubi.id = m.ubicacion_id
         JOIN estantes e ON e.id = ubi.estante_id
         WHERE {where_sql}
-        ORDER BY m.timestamp DESC
+        ORDER BY m.timestamp DESC, m.id ASC
         LIMIT ? OFFSET ?
     """
     async with db.execute(query_sql, tuple(params) + (limit, offset)) as cursor:
@@ -536,7 +536,7 @@ async def export_movimientos_csv(db: aiosqlite.Connection, filters: dict) -> str
         JOIN ubicaciones ubi ON ubi.id = m.ubicacion_id
         JOIN estantes e ON e.id = ubi.estante_id
         WHERE {where_sql}
-        ORDER BY m.timestamp DESC
+        ORDER BY m.timestamp DESC, m.id ASC
     """
 
     output = io.StringIO()

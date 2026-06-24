@@ -223,6 +223,7 @@ export interface MovimientoResponse {
 	stock_nuevo: number;
 	timestamp: string;
 	tipo: string;
+	producto_stock_total: number;
 }
 
 export interface MovimientoListResponse {

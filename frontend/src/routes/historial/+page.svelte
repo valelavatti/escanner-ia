@@ -216,7 +216,12 @@
 		if (m.tipo === 'asignacion' || m.tipo === 'desasignacion') {
 			return null;
 		}
-		return `Stock: ${m.stock_anterior} → ${m.stock_nuevo}`;
+		return `Stock ubicación: ${m.stock_anterior} → ${m.stock_nuevo}`;
+	}
+
+	function formatStockGeneral(m: MovimientoResponse): string | null {
+		if (!m.producto_sku || m.producto_stock_total == null) return null;
+		return `Stock general: ${m.producto_stock_total}`;
 	}
 
 	function formatUbicacion(m: MovimientoResponse): string {
@@ -350,11 +355,16 @@
 							<p class="movimiento-card__description">
 								{formatDescription(movimiento)}
 							</p>
-							{#if formatStockChange(movimiento)}
-								<p class="movimiento-card__stock">
-									{formatStockChange(movimiento)}
-								</p>
-							{/if}
+						{#if formatStockChange(movimiento)}
+							<p class="movimiento-card__stock">
+								{formatStockChange(movimiento)}
+							</p>
+						{/if}
+						{#if formatStockGeneral(movimiento)}
+							<p class="movimiento-card__stock-general">
+								{formatStockGeneral(movimiento)}
+							</p>
+						{/if}
 							<p class="movimiento-card__producto">
 								{movimiento.producto_descripcion ?? ''}
 							</p>
@@ -649,6 +659,13 @@
 		font-size: 0.875rem;
 		font-weight: 600;
 		color: #334155;
+	}
+
+	.movimiento-card__stock-general {
+		margin: 0;
+		font-size: 0.8125rem;
+		font-weight: 500;
+		color: #64748b;
 	}
 
 	.movimiento-card__producto {
