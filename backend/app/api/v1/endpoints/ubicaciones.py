@@ -58,7 +58,7 @@ async def assign_producto_to_ubicacion(
 
     try:
         await ubicacion_repository.assign_producto_to_ubicacion(
-            db, ubicacion_id, data.producto_id
+            db, ubicacion_id, data.producto_id, user.id
         )
     except ubicacion_repository.UbicacionOcupadaError:
         raise HTTPException(
@@ -94,6 +94,6 @@ async def unassign_producto_from_ubicacion(
             detail="La ubicacion no tiene un producto asignado",
         )
 
-    await ubicacion_repository.unassign_producto_from_ubicacion(db, ubicacion_id)
+    await ubicacion_repository.unassign_producto_from_ubicacion(db, ubicacion_id, user.id)
     updated = await ubicacion_repository.get_ubicacion_by_id(db, ubicacion_id)
     return _ubicacion_response(updated)

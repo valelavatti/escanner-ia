@@ -216,11 +216,18 @@ export interface MovimientoResponse {
 	ubicacion_id: number;
 	ubicacion_qr: string;
 	estante_nombre: string;
+	fila: number;
+	columna: number;
 	cantidad: number;
 	stock_anterior: number;
 	stock_nuevo: number;
 	timestamp: string;
 	tipo: string;
+}
+
+export interface MovimientoListResponse {
+	items: MovimientoResponse[];
+	total: number;
 }
 
 export async function listDepositos(): Promise<Deposito[]> {
@@ -331,6 +338,59 @@ export async function createMovimiento(data: MovimientoCreate): Promise<Movimien
 		method: 'POST',
 		body: JSON.stringify(data)
 	});
+}
+
+export interface MovimientoFilters {
+	usuario_id?: number;
+	producto_sku?: string;
+	ubicacion_id?: number;
+	from_date?: string;
+	to_date?: string;
+	limit?: number;
+	offset?: number;
+}
+
+export async function listMovimientos(filters: MovimientoFilters): Promise<MovimientoListResponse> {
+	const params = new URLSearchParams();
+	if (filters.usuario_id) params.set('usuario_id', String(filters.usuario_id));
+	if (filters.producto_sku) params.set('producto_sku', filters.producto_sku);
+	if (filters.ubicacion_id) params.set('ubicacion_id', String(filters.ubicacion_id));
+	if (filters.from_date) params.set('from_date', filters.from_date);
+	if (filters.to_date) params.set('to_date', filters.to_date);
+	if (filters.limit) params.set('limit', String(filters.limit));
+	if (filters.offset) params.set('offset', String(filters.offset));
+	return api<MovimientoListResponse>(`/movimientos?${params.toString()}`);
+}
+
+export async function exportMovimientosCSV(filters: MovimientoFilters): Promise<Blob> {
+	const session = get(sessionStore);
+	const params = new URLSearchParams();
+	if (filters.usuario_id) params.set('usuario_id', String(filters.usuario_id));
+	if (filters.producto_sku) params.set('producto_sku', filters.producto_sku);
+	if (filters.ubicacion_id) params.set('ubicacion_id', String(filters.ubicacion_id));
+	if (filters.from_date) params.set('from_date', filters.from_date);
+	if (filters.to_date) params.set('to_date', filters.to_date);
+
+	const headers: Record<string, string> = {};
+	if (session?.token) {
+		headers['Authorization'] = `Bearer ${session.token}`;
+	}
+
+	const response = await fetch(`${API_BASE}/movimientos/export?${params.toString()}`, {
+		headers
+	});
+
+	if (!response.ok) {
+		const body = (await response.json().catch(() => null)) as unknown;
+		let message = `Error HTTP ${response.status}`;
+		if (body && typeof body === 'object' && 'detail' in body) {
+			const detail = body.detail;
+			if (typeof detail === 'string') message = detail;
+		}
+		throw new ApiError(message, response.status, body);
+	}
+
+	return response.blob();
 }
 
 export async function getEstanteUbicaciones(estanteId: number): Promise<Ubicacion[]> {

@@ -165,6 +165,7 @@ async def assign_producto_to_ubicacion(
     db: aiosqlite.Connection,
     ubicacion_id: int,
     producto_id: str,
+    usuario_id: int,
 ) -> bool:
     """Assign a product SKU to an empty ubicacion.
 
@@ -191,6 +192,17 @@ async def assign_producto_to_ubicacion(
         """,
         (producto_id, ubicacion_id),
     )
+
+    # Append-only audit record for the assignment (no stock change).
+    await db.execute(
+        """
+        INSERT INTO movimientos
+            (usuario_id, producto_id, ubicacion_id, cantidad, stock_anterior, stock_nuevo, tipo)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (usuario_id, producto_id, ubicacion_id, 0, 0, 0, "asignacion"),
+    )
+
     await db.commit()
     return True
 
@@ -198,6 +210,7 @@ async def assign_producto_to_ubicacion(
 async def unassign_producto_from_ubicacion(
     db: aiosqlite.Connection,
     ubicacion_id: int,
+    usuario_id: int,
 ) -> bool:
     """Remove the product assignment from a ubicacion (set producto_id = NULL).
 
@@ -206,13 +219,16 @@ async def unassign_producto_from_ubicacion(
     Returns True if the ubicacion existed, False otherwise.
     """
     async with db.execute(
-        "SELECT id FROM ubicaciones WHERE id = ?",
+        "SELECT producto_id, stock_actual FROM ubicaciones WHERE id = ?",
         (ubicacion_id,),
     ) as cursor:
         row = await cursor.fetchone()
 
     if row is None:
         return False
+
+    old_producto_id = row["producto_id"]
+    stock_anterior = row["stock_actual"]
 
     await db.execute(
         """
@@ -222,6 +238,18 @@ async def unassign_producto_from_ubicacion(
         """,
         (ubicacion_id,),
     )
+
+    # Append-only audit record for the removal (stock conceptually reset to 0).
+    if old_producto_id is not None:
+        await db.execute(
+            """
+            INSERT INTO movimientos
+                (usuario_id, producto_id, ubicacion_id, cantidad, stock_anterior, stock_nuevo, tipo)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (usuario_id, old_producto_id, ubicacion_id, 0, stock_anterior, 0, "desasignacion"),
+        )
+
     await db.commit()
     return True
 
