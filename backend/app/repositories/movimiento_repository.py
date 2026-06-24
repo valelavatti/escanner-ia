@@ -155,7 +155,36 @@ async def _create_movimiento_once(
         if stock_nuevo < 0:
             raise NegativeStockError("El stock no puede ser negativo")
 
-        # Insert the immutable audit record.
+        # Track assignment/desasignacion BEFORE the stock movement (all in same TX).
+        old_producto_id = ubicacion["producto_id"]
+        is_new_assignment = old_producto_id is None and producto_sku is not None and not es_suelto
+        is_reassignment = (
+            old_producto_id is not None
+            and old_producto_id != producto_sku
+            and not es_suelto
+        )
+
+        if is_reassignment:
+            await db.execute(
+                """
+                INSERT INTO movimientos (usuario_id, producto_id, ubicacion_id,
+                    cantidad, stock_anterior, stock_nuevo, tipo)
+                VALUES (?, ?, ?, 0, ?, 0, 'desasignacion')
+                """,
+                (usuario_id, old_producto_id, ubicacion_id, ubicacion["stock_actual"]),
+            )
+
+        if is_new_assignment or is_reassignment:
+            await db.execute(
+                """
+                INSERT INTO movimientos (usuario_id, producto_id, ubicacion_id,
+                    cantidad, stock_anterior, stock_nuevo, tipo)
+                VALUES (?, ?, ?, 0, 0, 0, 'asignacion')
+                """,
+                (usuario_id, producto_sku, ubicacion_id),
+            )
+
+        # Insert the immutable audit record for the stock change.
         cursor = await db.execute(
             """
             INSERT INTO movimientos
