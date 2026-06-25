@@ -398,3 +398,93 @@ export async function exportMovimientosCSV(filters: MovimientoFilters): Promise<
 export async function getEstanteUbicaciones(estanteId: number): Promise<Ubicacion[]> {
 	return api<Ubicacion[]>(`/estantes/${estanteId}/ubicaciones`);
 }
+
+// ---------------------------------------------------------------------------
+// QR generation endpoints (return binary content)
+// ---------------------------------------------------------------------------
+
+async function extractBlobError(response: Response): Promise<{ message: string; body: unknown }> {
+	const body = (await response.json().catch(() => null)) as unknown;
+	let message = `Error HTTP ${response.status}`;
+
+	if (body && typeof body === 'object') {
+		if ('error' in body && typeof body.error === 'string' && body.error) {
+			message = body.error;
+		} else if ('detail' in body) {
+			const detail = body.detail;
+			if (detail && typeof detail === 'object') {
+				if ('error' in detail && typeof detail.error === 'string' && detail.error) {
+					message = detail.error;
+				}
+			} else if (typeof detail === 'string') {
+				message = detail;
+			}
+		}
+	}
+
+	return { message, body };
+}
+
+async function authenticatedBlobFetch(path: string, acceptHeader: string): Promise<Response> {
+	const session = get(sessionStore);
+	const headers: Record<string, string> = { Accept: acceptHeader };
+
+	if (session?.token) {
+		headers['Authorization'] = `Bearer ${session.token}`;
+	}
+
+	const response = await fetch(`${API_BASE}${path}`, { headers });
+
+	if (response.status === 401) {
+		clearSession();
+		if (browser) {
+			window.location.href = '/login';
+		}
+		throw new Error('Sesión inválida o expirada');
+	}
+
+	return response;
+}
+
+export async function getUbicacionQR(ubicacionId: number, size: number = 200): Promise<Blob> {
+	const response = await authenticatedBlobFetch(
+		`/ubicaciones/${ubicacionId}/qr.png?size=${size}`,
+		'image/png'
+	);
+
+	if (!response.ok) {
+		const { message, body } = await extractBlobError(response);
+		throw new ApiError(message, response.status, body);
+	}
+
+	return response.blob();
+}
+
+export async function downloadEstanteQRsZip(estanteId: number): Promise<Blob> {
+	const response = await authenticatedBlobFetch(`/estantes/${estanteId}/qrs`, 'application/zip');
+
+	if (!response.ok) {
+		const { message, body } = await extractBlobError(response);
+		throw new ApiError(message, response.status, body);
+	}
+
+	return response.blob();
+}
+
+export async function getEstanteQRPrintSheet(
+	estanteId: number,
+	perPage: number,
+	size: number
+): Promise<Blob> {
+	const response = await authenticatedBlobFetch(
+		`/estantes/${estanteId}/qrs/print?per_page=${perPage}&size=${size}`,
+		'image/png'
+	);
+
+	if (!response.ok) {
+		const { message, body } = await extractBlobError(response);
+		throw new ApiError(message, response.status, body);
+	}
+
+	return response.blob();
+}

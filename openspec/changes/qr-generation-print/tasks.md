@@ -169,11 +169,11 @@ This keeps each review focused and lets the backend contract stabilize before th
 - `frontend/src/lib/api/client.ts` (modify)
 
 **Acceptance criteria**:
-- [ ] `getUbicacionQR(ubicacionId: number, size: number): Promise<Blob>` is exported.
-- [ ] `downloadEstanteQRsZip(estanteId: number): Promise<Blob>` is exported.
-- [ ] `getEstanteQRPrintSheet(estanteId: number, perPage: number, size: number): Promise<Blob>` is exported.
-- [ ] Each helper performs an authenticated `fetch`, handles 401 by clearing the session and redirecting, and returns `response.blob()` on success.
-- [ ] Non-OK responses throw `ApiError` with a readable message (reusing existing error extraction logic).
+- [x] `getUbicacionQR(ubicacionId: number, size: number): Promise<Blob>` is exported.
+- [x] `downloadEstanteQRsZip(estanteId: number): Promise<Blob>` is exported.
+- [x] `getEstanteQRPrintSheet(estanteId: number, perPage: number, size: number): Promise<Blob>` is exported.
+- [x] Each helper performs an authenticated `fetch`, handles 401 by clearing the session and redirecting, and returns `response.blob()` on success.
+- [x] Non-OK responses throw `ApiError` with a readable message (reusing existing error extraction logic).
 
 **Estimated lines**: 30–50
 
@@ -191,18 +191,18 @@ This keeps each review focused and lets the backend contract stabilize before th
 - `frontend/src/lib/components/QrPrintModal.svelte` (create)
 
 **Acceptance criteria**:
-- [ ] Component props match `estante: Estante`, `ubicaciones: Ubicacion[]`, `open: boolean`, `onClose: () => void`.
-- [ ] Modal title reads `Imprimir QRs de {estante.nombre}`.
-- [ ] Dropdown "QRs por hoja" offers 1, 2, 4, 6, 8, 9 and defaults to 4.
-- [ ] Dropdown "Tamaño" offers Pequeño (150), Mediano (200), Grande (300) and defaults to Mediano.
-- [ ] Live SVG/HTML grid preview updates when either dropdown changes, matching the `(cols, rows)` layout.
-- [ ] "Generar e imprimir" button fetches the A4 PNG, opens it in a new tab via `window.open(URL.createObjectURL(blob))`, and triggers `window.print()` after load.
-- [ ] "Descargar ZIP" button fetches the ZIP and initiates a browser download via a temporary anchor.
-- [ ] "Cerrar" button calls `onClose`.
-- [ ] Buttons show a loading state and are disabled while a request is in flight.
-- [ ] Errors (network, 404, 401) display a clear message in the modal.
-- [ ] On viewports narrower than 640 px the modal renders as a bottom sheet (anchored bottom, rounded top corners, full width).
-- [ ] All interactive targets meet the 48×48 px minimum.
+- [x] Component props match `estante: Estante`, `ubicaciones: Ubicacion[]`, `open: boolean`, `onClose: () => void`.
+- [x] Modal title reads `Imprimir QRs de {estante.nombre}`.
+- [x] Dropdown "QRs por hoja" offers 1, 2, 4, 6, 8, 9 and defaults to 4.
+- [x] Dropdown "Tamaño" offers Pequeño (150), Mediano (200), Grande (300) and defaults to Mediano.
+- [x] Live SVG/HTML grid preview updates when either dropdown changes, matching the `(cols, rows)` layout.
+- [x] "Generar e imprimir" button fetches the A4 PNG, opens it in a new tab via `window.open(URL.createObjectURL(blob))`, and triggers `window.print()` after load.
+- [x] "Descargar ZIP" button fetches the ZIP and initiates a browser download via a temporary anchor.
+- [x] "Cerrar" button calls `onClose`.
+- [x] Buttons show a loading state and are disabled while a request is in flight.
+- [x] Errors (network, 404, 401) display a clear message in the modal.
+- [x] On viewports narrower than 640 px the modal renders as a bottom sheet (anchored bottom, rounded top corners, full width).
+- [x] All interactive targets meet the 48×48 px minimum.
 
 **Estimated lines**: 150–250
 
@@ -220,12 +220,12 @@ This keeps each review focused and lets the backend contract stabilize before th
 - `frontend/src/routes/admin/estantes/+page.svelte` (modify)
 
 **Acceptance criteria**:
-- [ ] `QrPrintModal` is imported from `$lib/components/QrPrintModal.svelte`.
-- [ ] `qrPrintOpen = $state(false)` is added.
-- [ ] An "Imprimir QRs" button is shown in the detail header only when `activeUbicaciones.length > 0`.
-- [ ] The button uses the existing `button button--primary` style and is disabled while loading.
-- [ ] Clicking the button opens `QrPrintModal` with the current estante and active ubicaciones.
-- [ ] Closing the modal resets `qrPrintOpen` to `false`.
+- [x] `QrPrintModal` is imported from `$lib/components/QrPrintModal.svelte`.
+- [x] `qrPrintOpen = $state(false)` is added.
+- [x] An "Imprimir QRs" button is shown in the detail header only when `activeUbicaciones.length > 0`.
+- [x] The button uses the existing `button button--primary` style and is disabled while loading.
+- [x] Clicking the button opens `QrPrintModal` with the current estante and active ubicaciones.
+- [x] Closing the modal resets `qrPrintOpen` to `false`.
 
 **Estimated lines**: 20–35
 

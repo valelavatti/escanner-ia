@@ -16,6 +16,7 @@
 		type Ubicacion,
 		type ProductSearchResult
 	} from '$lib/api/client';
+	import QrPrintModal from '$lib/components/QrPrintModal.svelte';
 
 	// ---------------------------------------------------------------------------
 	// State
@@ -29,6 +30,7 @@
 	let view = $state<'list' | 'detail'>('list');
 	let selectedEstante = $state<Estante | null>(null);
 	let selectedUbicaciones = $state<Ubicacion[]>([]);
+	let showQrPrint = $state(false);
 
 	// Create form
 	let createOpen = $state(false);
@@ -137,6 +139,7 @@
 		view = 'list';
 		selectedEstante = null;
 		selectedUbicaciones = [];
+		showQrPrint = false;
 	}
 
 	function resetCreateForm() {
@@ -457,7 +460,18 @@
 						{/if}
 					</p>
 				</div>
-				<button class="button button--secondary" onclick={closeDetail}>Volver</button>
+				<div class="detail-header__actions">
+					{#if activeUbicaciones.length > 0}
+						<button
+							class="button button--primary"
+							onclick={() => (showQrPrint = true)}
+							disabled={loading}
+						>
+							Imprimir QRs
+						</button>
+					{/if}
+					<button class="button button--secondary" onclick={closeDetail}>Volver</button>
+				</div>
 			</header>
 
 			{#if message}
@@ -509,6 +523,10 @@
 		</div>
 	{/if}
 </section>
+
+{#if showQrPrint && selectedEstante}
+	<QrPrintModal estante={selectedEstante} onClose={() => (showQrPrint = false)} />
+{/if}
 
 {#if createOpen}
 	<div
@@ -754,6 +772,12 @@
 		flex-direction: row;
 		align-items: flex-start;
 		justify-content: space-between;
+	}
+
+	.detail-header__actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
 	}
 
 	h1 {
