@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
 	import {
 		listEstantes,
 		listDepositos,
@@ -97,6 +98,48 @@
 
 	function cellClass(ubicacion: Ubicacion): string {
 		return ubicacion.producto_id ? 'cell cell--occupied' : 'cell cell--empty';
+	}
+
+	function viewBlobInOverlay(blob: Blob, title: string) {
+		if (!browser) return;
+
+		const url = URL.createObjectURL(blob);
+
+		const container = document.createElement('div');
+		container.style.cssText =
+			'position:fixed;inset:0;z-index:9999;background:#0f172a;';
+
+		const iframe = document.createElement('iframe');
+		iframe.src = url;
+		iframe.title = title;
+		iframe.style.cssText = 'width:100%;height:100%;border:none;display:block;';
+
+		const closeBtn = document.createElement('button');
+		closeBtn.type = 'button';
+		closeBtn.textContent = '✕ Cerrar';
+		closeBtn.setAttribute('aria-label', 'Cerrar vista previa');
+		closeBtn.style.cssText =
+			'position:fixed;top:10px;right:10px;z-index:10000;padding:10px 16px;font-size:16px;font-weight:600;background:#dc2626;color:#fff;border:none;border-radius:8px;cursor:pointer;touch-action:manipulation;';
+
+		function cleanup() {
+			if (container.parentNode) container.parentNode.removeChild(container);
+			if (closeBtn.parentNode) closeBtn.parentNode.removeChild(closeBtn);
+			URL.revokeObjectURL(url);
+		}
+
+		closeBtn.addEventListener('click', cleanup);
+
+		function escHandler(e: KeyboardEvent) {
+			if (e.key === 'Escape') {
+				cleanup();
+				document.removeEventListener('keydown', escHandler);
+			}
+		}
+		document.addEventListener('keydown', escHandler);
+
+		container.appendChild(iframe);
+		document.body.appendChild(container);
+		document.body.appendChild(closeBtn);
 	}
 
 	async function loadDepositos() {
@@ -359,8 +402,7 @@
 	async function handlePrintUbicacionQR(ubicacion: Ubicacion) {
 		try {
 			const blob = await getUbicacionQR(ubicacion.id, 1000);
-			const url = URL.createObjectURL(blob);
-			window.open(url, '_blank');
+			viewBlobInOverlay(blob, `QR de ${ubicacion.qr_valor}`);
 		} catch (err) {
 			showMessage(err instanceof Error ? err.message : 'Error al generar el QR', 'error');
 		}

@@ -53,6 +53,48 @@
 		return err instanceof Error ? err.message : 'Error inesperado. Intentá de nuevo.';
 	}
 
+	function viewBlobInOverlay(blob: Blob, title: string) {
+		if (!browser) return;
+
+		const url = URL.createObjectURL(blob);
+
+		const container = document.createElement('div');
+		container.style.cssText =
+			'position:fixed;inset:0;z-index:9999;background:#0f172a;';
+
+		const iframe = document.createElement('iframe');
+		iframe.src = url;
+		iframe.title = title;
+		iframe.style.cssText = 'width:100%;height:100%;border:none;display:block;';
+
+		const closeBtn = document.createElement('button');
+		closeBtn.type = 'button';
+		closeBtn.textContent = '✕ Cerrar';
+		closeBtn.setAttribute('aria-label', 'Cerrar vista previa');
+		closeBtn.style.cssText =
+			'position:fixed;top:10px;right:10px;z-index:10000;padding:10px 16px;font-size:16px;font-weight:600;background:#dc2626;color:#fff;border:none;border-radius:8px;cursor:pointer;touch-action:manipulation;';
+
+		function cleanup() {
+			if (container.parentNode) container.parentNode.removeChild(container);
+			if (closeBtn.parentNode) closeBtn.parentNode.removeChild(closeBtn);
+			URL.revokeObjectURL(url);
+		}
+
+		closeBtn.addEventListener('click', cleanup);
+
+		function escHandler(e: KeyboardEvent) {
+			if (e.key === 'Escape') {
+				cleanup();
+				document.removeEventListener('keydown', escHandler);
+			}
+		}
+		document.addEventListener('keydown', escHandler);
+
+		container.appendChild(iframe);
+		document.body.appendChild(container);
+		document.body.appendChild(closeBtn);
+	}
+
 	async function handleGenerate() {
 		if (isGenerating || isDownloading) return;
 		isGenerating = true;
@@ -60,13 +102,7 @@
 
 		try {
 			const blob = await getEstanteQRPrintSheet(estante.id, perPage);
-			const blobUrl = URL.createObjectURL(blob);
-
-			if (browser) {
-				// Open the PDF in a new tab; the browser's native PDF viewer
-				// handles multi-page rendering and printing.
-				window.open(blobUrl, '_blank');
-			}
+			viewBlobInOverlay(blob, `Hoja de impresión de ${estante.nombre}`);
 		} catch (err) {
 			error = getErrorMessage(err);
 		} finally {
