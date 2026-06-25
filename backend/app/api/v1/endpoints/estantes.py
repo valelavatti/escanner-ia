@@ -9,7 +9,12 @@ from typing import Optional
 import aiosqlite
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
-from app.api.v1.deps import get_current_user
+from app.api.v1.deps import (
+    get_current_user,
+    get_deposito_ids_for_user,
+    require_deposito_access,
+    require_deposito_role,
+)
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.repositories import estante_repository, ubicacion_repository
@@ -68,6 +73,10 @@ async def create_estante(
     user: UsuarioResponse = Depends(get_current_user),
 ):
     """Create a new estante and auto-generate its ubicaciones grid."""
+    await require_deposito_role(
+        user, data.deposito_id, db, allowed_roles={"admin"}
+    )
+
     existing = await estante_repository.get_estante_by_name(db, data.nombre)
     if existing is not None:
         raise HTTPException(
@@ -104,8 +113,12 @@ async def list_estantes(
     user: UsuarioResponse = Depends(get_current_user),
 ):
     """List all estantes ordered by visual order."""
+    deposito_ids = await get_deposito_ids_for_user(db, user)
     rows = await estante_repository.list_estantes(
-        db, include_deleted=include_deleted, deposito_id=deposito_id
+        db,
+        include_deleted=include_deleted,
+        deposito_id=deposito_id,
+        deposito_ids=deposito_ids,
     )
     return [_estante_response(row) for row in rows]
 
@@ -115,8 +128,15 @@ async def list_depositos(
     db: aiosqlite.Connection = Depends(get_db),
     user: UsuarioResponse = Depends(get_current_user),
 ):
-    """List all depositos (warehouses) ordered by name."""
+    """List all depositos (warehouses) ordered by name.
+
+    Non-admins only see depositos assigned to them.
+    """
+    deposito_ids = await get_deposito_ids_for_user(db, user)
     rows = await estante_repository.list_depositos(db)
+    if deposito_ids is not None:
+        accessible = set(deposito_ids)
+        rows = [row for row in rows if row["id"] in accessible]
     return [DepositoResponse(id=row["id"], nombre=row["nombre"]) for row in rows]
 
 
@@ -133,6 +153,8 @@ async def get_estante(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Estante no encontrado",
         )
+
+    await require_deposito_access(user, estante.get("deposito_id"), db)
 
     ubicaciones = await ubicacion_repository.list_ubicaciones_by_estante(db, estante_id)
     estante["ubicaciones_count"] = len(ubicaciones)
@@ -162,6 +184,8 @@ async def update_estante(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Estante no encontrado",
         )
+
+    await require_deposito_access(user, current.get("deposito_id"), db)
 
     old_filas = current["filas"]
     old_columnas = current["columnas"]
@@ -212,6 +236,15 @@ async def delete_estante(
     user: UsuarioResponse = Depends(get_current_user),
 ):
     """Soft delete an estante, preserving its ubicaciones and audit history."""
+    estante = await estante_repository.get_estante_by_id(db, estante_id)
+    if estante is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Estante no encontrado",
+        )
+
+    await require_deposito_access(user, estante.get("deposito_id"), db)
+
     deleted = await estante_repository.soft_delete_estante(db, estante_id)
     if not deleted:
         raise HTTPException(
@@ -232,6 +265,15 @@ async def confirm_delete_out_of_bounds(
 
     Only ubicaciones that belong to this estante can be deleted.
     """
+    estante = await estante_repository.get_estante_by_id(db, estante_id)
+    if estante is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Estante no encontrado",
+        )
+
+    await require_deposito_access(user, estante.get("deposito_id"), db)
+
     ubicaciones = await ubicacion_repository.list_ubicaciones_by_estante(db, estante_id)
     valid_ids = {u["id"] for u in ubicaciones}
     ids_to_delete = [uid for uid in data.ubicacion_ids if uid in valid_ids]
@@ -261,6 +303,8 @@ async def list_ubicaciones_for_estante(
             detail="Estante no encontrado",
         )
 
+    await require_deposito_access(user, estante.get("deposito_id"), db)
+
     ubicaciones = await ubicacion_repository.list_ubicaciones_by_estante(db, estante_id)
     return [_ubicacion_response(u) for u in ubicaciones]
 
@@ -278,6 +322,8 @@ async def download_estante_qrs_zip(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Estante no encontrado",
         )
+
+    await require_deposito_access(user, estante.get("deposito_id"), db)
 
     qr_items = await qr_service.generate_estante_qrs(
         estante_id, db, get_settings().qr_default_size
@@ -320,6 +366,8 @@ async def print_estante_qrs(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Estante no encontrado",
         )
+
+    await require_deposito_access(user, estante.get("deposito_id"), db)
 
     # Generate QRs at the resolution required to fill the A4 cell cleanly.
     qr_draw_size = qr_service._calculate_qr_display_size(per_page)[0]

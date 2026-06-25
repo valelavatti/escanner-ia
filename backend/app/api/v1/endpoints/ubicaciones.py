@@ -3,7 +3,11 @@
 import aiosqlite
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
-from app.api.v1.deps import get_current_user
+from app.api.v1.deps import (
+    get_current_user,
+    require_deposito_access,
+    require_deposito_role,
+)
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.repositories import ubicacion_repository
@@ -50,6 +54,13 @@ async def assign_producto_to_ubicacion(
             detail="Ubicacion no encontrada",
         )
 
+    await require_deposito_role(
+        user,
+        ubicacion.get("deposito_id"),
+        db,
+        allowed_roles={"admin", "operator"},
+    )
+
     # Block assignment to the Suelto catch-all shelf.
     if ubicacion.get("estante_nombre") == "Suelto":
         raise HTTPException(
@@ -90,6 +101,13 @@ async def unassign_producto_from_ubicacion(
             detail="Ubicacion no encontrada",
         )
 
+    await require_deposito_role(
+        user,
+        ubicacion.get("deposito_id"),
+        db,
+        allowed_roles={"admin", "operator"},
+    )
+
     if ubicacion.get("producto_id") is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -115,6 +133,8 @@ async def get_ubicacion_qr_png(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Ubicacion no encontrada",
         )
+
+    await require_deposito_access(user, ubicacion.get("deposito_id"), db)
 
     png_bytes = await qr_service.get_or_create_qr_bytes(ubicacion["qr_valor"], size)
     return Response(content=png_bytes, media_type="image/png")

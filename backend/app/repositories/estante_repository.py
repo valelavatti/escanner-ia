@@ -24,11 +24,17 @@ async def list_estantes(
     db: aiosqlite.Connection,
     include_deleted: bool = False,
     deposito_id: Optional[int] = None,
+    deposito_ids: Optional[list[int]] = None,
 ) -> list[dict]:
     """Return all estantes ordered by visual order, optionally including soft-deleted ones.
 
-    Filters by deposito_id when provided.
+    Filters by deposito_id when provided. When deposito_ids is a non-empty list,
+    only estantes whose deposito_id is in that list are returned; an empty list
+    returns no results. Admins pass deposito_ids=None to bypass the filter.
     """
+    if deposito_ids is not None and not deposito_ids:
+        return []
+
     sql = """
         SELECT e.*,
                d.nombre AS deposito_nombre,
@@ -45,6 +51,11 @@ async def list_estantes(
     if deposito_id is not None:
         conditions.append("e.deposito_id = ?")
         params.append(deposito_id)
+
+    if deposito_ids is not None:
+        placeholders = ",".join("?" for _ in deposito_ids)
+        conditions.append(f"e.deposito_id IN ({placeholders})")
+        params.extend(deposito_ids)
 
     if conditions:
         sql += " WHERE " + " AND ".join(conditions)

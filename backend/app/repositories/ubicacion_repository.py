@@ -114,7 +114,8 @@ async def get_ubicacion_by_id(db: aiosqlite.Connection, ubicacion_id: int) -> Op
             u.estado,
             p.sku AS producto_sku,
             p.descripcion AS producto_descripcion,
-            e.nombre AS estante_nombre
+            e.nombre AS estante_nombre,
+            e.deposito_id
         FROM ubicaciones u
         JOIN estantes e ON e.id = u.estante_id
         LEFT JOIN productos p ON p.sku = u.producto_id
@@ -147,7 +148,8 @@ async def get_ubicacion_by_qr(db: aiosqlite.Connection, qr_valor: str) -> Option
             u.estado,
             p.sku AS producto_sku,
             p.descripcion AS producto_descripcion,
-            e.nombre AS estante_nombre
+            e.nombre AS estante_nombre,
+            e.deposito_id
         FROM ubicaciones u
         JOIN estantes e ON e.id = u.estante_id
         LEFT JOIN productos p ON p.sku = u.producto_id

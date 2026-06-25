@@ -157,8 +157,8 @@
 - **Files to create/modify**:
   - Modify `backend/app/repositories/estante_repository.py`
 - **Acceptance criteria**:
-  - [ ] `list_estantes(..., deposito_ids: Optional[list[int]] = None)` adds `e.deposito_id IN (...)` filter when `deposito_ids` is a non-empty list; returns empty list when `deposito_ids == []`.
-  - [ ] `get_estante_by_id` includes `e.deposito_id` in the returned row.
+  - [x] `list_estantes(..., deposito_ids: Optional[list[int]] = None)` adds `e.deposito_id IN (...)` filter when `deposito_ids` is a non-empty list; returns empty list when `deposito_ids == []`.
+  - [x] `get_estante_by_id` includes `e.deposito_id` in the returned row.
 - **Estimated lines**: 30
 - **PR slice**: PR 2
 
@@ -169,9 +169,9 @@
 - **Files to create/modify**:
   - Modify `backend/app/repositories/movimiento_repository.py`
 - **Acceptance criteria**:
-  - [ ] `list_movimientos(..., deposito_ids)` joins through `ubicaciones -> estantes` and adds `e.deposito_id IN (...)` to both count and paginated queries.
-  - [ ] `export_movimientos_csv(..., deposito_ids)` applies the same filter.
-  - [ ] `get_movimiento_by_id` includes `e.deposito_id` in the returned row.
+  - [x] `list_movimientos(..., deposito_ids)` joins through `ubicaciones -> estantes` and adds `e.deposito_id IN (...)` to both count and paginated queries.
+  - [x] `export_movimientos_csv(..., deposito_ids)` applies the same filter.
+  - [x] `get_movimiento_by_id` includes `e.deposito_id` in the returned row.
 - **Estimated lines**: 50
 - **PR slice**: PR 2
 
@@ -182,8 +182,8 @@
 - **Files to create/modify**:
   - Modify `backend/app/repositories/ubicacion_repository.py`
 - **Acceptance criteria**:
-  - [ ] `get_ubicacion_by_qr` returns `e.deposito_id` joined through `estantes`.
-  - [ ] `get_ubicacion_by_id` returns `e.deposito_id`.
+  - [x] `get_ubicacion_by_qr` returns `e.deposito_id` joined through `estantes`.
+  - [x] `get_ubicacion_by_id` returns `e.deposito_id`.
 - **Estimated lines**: 20
 - **PR slice**: PR 2
 
@@ -194,13 +194,13 @@
 - **Files to create/modify**:
   - Modify `backend/app/api/v1/endpoints/estantes.py`
 - **Acceptance criteria**:
-  - [ ] `GET /estantes` calls `get_deposito_ids_for_user` and passes the result to `list_estantes`.
-  - [ ] `GET /estantes/{id}` verifies depósito access after fetch; returns `403` if unauthorized.
-  - [ ] `POST /estantes` verifies `deposito_id` is accessible and user has `admin` role for that depósito (or global admin).
-  - [ ] `PUT /estantes/{id}` verifies depósito access.
-  - [ ] `DELETE /estantes/{id}` verifies depósito access.
-  - [ ] `GET /estantes/{id}/ubicaciones`, `/qrs`, `/qrs/print` verify depósito access.
-  - [ ] `GET /depositos` returns only accessible depósitos for non-admins; admins see all.
+  - [x] `GET /estantes` calls `get_deposito_ids_for_user` and passes the result to `list_estantes`.
+  - [x] `GET /estantes/{id}` verifies depósito access after fetch; returns `403` if unauthorized.
+  - [x] `POST /estantes` verifies `deposito_id` is accessible and user has `admin` role for that depósito (or global admin).
+  - [x] `PUT /estantes/{id}` verifies depósito access.
+  - [x] `DELETE /estantes/{id}` verifies depósito access.
+  - [x] `GET /estantes/{id}/ubicaciones`, `/qrs`, `/qrs/print` verify depósito access.
+  - [x] `GET /depositos` returns only accessible depósitos for non-admins; admins see all.
 - **Estimated lines**: 60
 - **PR slice**: PR 2
 
@@ -211,10 +211,10 @@
 - **Files to create/modify**:
   - Modify `backend/app/api/v1/endpoints/movimientos.py`
 - **Acceptance criteria**:
-  - [ ] `GET /movimientos` filters by user's `deposito_ids`.
-  - [ ] `GET /movimientos/export` applies the same filter.
-  - [ ] `GET /movimientos/{id}` verifies the movement's depósito is accessible.
-  - [ ] `POST /movimientos` loads ubicación (with `deposito_id`), checks `require_deposito_role(..., allowed_roles={"admin", "operator"})`, then creates the movement.
+  - [x] `GET /movimientos` filters by user's `deposito_ids`.
+  - [x] `GET /movimientos/export` applies the same filter.
+  - [x] `GET /movimientos/{id}` verifies the movement's depósito is accessible.
+  - [x] `POST /movimientos` loads ubicación (with `deposito_id`), checks `require_deposito_role(..., allowed_roles={"admin", "operator"})`, then creates the movement.
 - **Estimated lines**: 50
 - **PR slice**: PR 2
 
@@ -225,7 +225,7 @@
 - **Files to create/modify**:
   - Modify `backend/app/api/v1/endpoints/sectores.py`
 - **Acceptance criteria**:
-  - [ ] `GET /sectores/lookup` calls `require_deposito_access` after locating the ubicación and returns `403` for unauthorized depósitos.
+  - [x] `GET /sectores/lookup` calls `require_deposito_access` after locating the ubicación and returns `403` for unauthorized depósitos.
 - **Estimated lines**: 15
 - **PR slice**: PR 2
 
@@ -236,9 +236,9 @@
 - **Files to create/modify**:
   - Modify `backend/app/api/v1/endpoints/ubicaciones.py`
 - **Acceptance criteria**:
-  - [ ] `PUT /ubicaciones/{id}/assign` verifies depósito access and write role (`admin`/`operator`).
-  - [ ] `DELETE /ubicaciones/{id}/assign` verifies depósito access and write role.
-  - [ ] `GET /ubicaciones/{id}/qr.png` verifies depósito access.
+  - [x] `PUT /ubicaciones/{id}/assign` verifies depósito access and write role (`admin`/`operator`).
+  - [x] `DELETE /ubicaciones/{id}/assign` verifies depósito access and write role.
+  - [x] `GET /ubicaciones/{id}/qr.png` verifies depósito access.
 - **Estimated lines**: 30
 - **PR slice**: PR 2
 
@@ -249,7 +249,7 @@
 - **Files to create/modify**:
   - Modify `backend/app/api/v1/endpoints/import_.py`
 - **Acceptance criteria**:
-  - [ ] `POST /import/excel` uses `require_admin`; non-admins receive `403`.
+  - [x] `POST /import/excel` uses `require_admin`; non-admins receive `403`.
 - **Estimated lines**: 10
 - **PR slice**: PR 2
 

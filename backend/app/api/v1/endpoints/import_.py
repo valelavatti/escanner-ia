@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
 import aiosqlite
 
-from app.api.v1.deps import get_current_user
+from app.api.v1.deps import get_current_user, require_admin
 from app.core.database import get_db
 from app.schemas.auth import UsuarioResponse
 from app.schemas.import_ import ImportStrategy, ImportSummaryResponse
@@ -18,12 +18,12 @@ async def import_excel(
     file: UploadFile = File(...),
     strategy: ImportStrategy = ImportStrategy.error,
     db: aiosqlite.Connection = Depends(get_db),
-    user: UsuarioResponse = Depends(get_current_user),
+    user: UsuarioResponse = Depends(require_admin),
 ):
     """Import products from an Excel file (.xlsx or .xls).
 
-    Requires authentication. Use the `strategy` query parameter to choose how
-    duplicate SKUs are handled:
+    Requires global admin privileges. Use the `strategy` query parameter to
+    choose how duplicate SKUs are handled:
     - `error` (default): abort the whole import if a duplicate SKU exists.
     - `skip`: keep the existing product and skip the duplicate.
     - `overwrite`: replace the existing product with the Excel row.

@@ -316,6 +316,7 @@ async def get_movimiento_by_id(db: aiosqlite.Connection, movimiento_id: int) -> 
             m.ubicacion_id,
             ubi.qr_valor AS ubicacion_qr,
             e.nombre AS estante_nombre,
+            e.deposito_id,
             ubi.fila,
             ubi.columna,
             m.cantidad,
@@ -436,12 +437,20 @@ async def get_producto_stock_total(db: aiosqlite.Connection, producto_sku: str) 
 async def list_movimientos(
     db: aiosqlite.Connection,
     filters: dict,
+    deposito_ids: Optional[list[int]] = None,
 ) -> tuple[list[dict], int]:
     """Return filtered movements ordered by timestamp DESC plus total count.
 
     Supported filters: usuario_id, producto_sku, ubicacion_id, from_date, to_date.
     Pagination: limit, offset.
+
+    When deposito_ids is a non-empty list, only movements whose ubicacion belongs
+    to one of those depositos are returned. An empty list returns no results.
+    Admins pass deposito_ids=None to bypass the filter.
     """
+    if deposito_ids is not None and not deposito_ids:
+        return [], 0
+
     where_clauses: list[str] = []
     params: list = []
 
@@ -465,11 +474,18 @@ async def list_movimientos(
         where_clauses.append("m.timestamp <= ?")
         params.append(filters["to_date"])
 
+    if deposito_ids is not None:
+        placeholders = ",".join("?" for _ in deposito_ids)
+        where_clauses.append(f"e.deposito_id IN ({placeholders})")
+        params.extend(deposito_ids)
+
     where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
 
     count_sql = f"""
         SELECT COUNT(*)
         FROM movimientos m
+        JOIN ubicaciones ubi ON ubi.id = m.ubicacion_id
+        JOIN estantes e ON e.id = ubi.estante_id
         WHERE {where_sql}
     """
     async with db.execute(count_sql, tuple(params)) as cursor:
@@ -489,6 +505,7 @@ async def list_movimientos(
             m.ubicacion_id,
             ubi.qr_valor AS ubicacion_qr,
             e.nombre AS estante_nombre,
+            e.deposito_id,
             ubi.fila,
             ubi.columna,
             m.cantidad,
@@ -512,8 +529,31 @@ async def list_movimientos(
         return [dict(row) for row in rows], total
 
 
-async def export_movimientos_csv(db: aiosqlite.Connection, filters: dict) -> str:
+async def export_movimientos_csv(
+    db: aiosqlite.Connection,
+    filters: dict,
+    deposito_ids: Optional[list[int]] = None,
+) -> str:
     """Return a CSV string of all matching movements (no pagination)."""
+    if deposito_ids is not None and not deposito_ids:
+        output = io.StringIO()
+        writer = csv.writer(output, lineterminator="\n")
+        writer.writerow([
+            "id",
+            "usuario",
+            "producto_sku",
+            "producto_descripcion",
+            "estante",
+            "fila",
+            "columna",
+            "cantidad",
+            "stock_anterior",
+            "stock_nuevo",
+            "fecha_hora",
+            "tipo",
+        ])
+        return output.getvalue()
+
     where_clauses: list[str] = []
     params: list = []
 
@@ -536,6 +576,11 @@ async def export_movimientos_csv(db: aiosqlite.Connection, filters: dict) -> str
     if filters.get("to_date") is not None:
         where_clauses.append("m.timestamp <= ?")
         params.append(filters["to_date"])
+
+    if deposito_ids is not None:
+        placeholders = ",".join("?" for _ in deposito_ids)
+        where_clauses.append(f"e.deposito_id IN ({placeholders})")
+        params.extend(deposito_ids)
 
     where_sql = " AND ".join(where_clauses) if where_clauses else "1=1"
 

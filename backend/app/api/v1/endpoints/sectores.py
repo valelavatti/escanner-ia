@@ -3,7 +3,7 @@
 import aiosqlite
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.api.v1.deps import get_current_user
+from app.api.v1.deps import get_current_user, require_deposito_access
 from app.core.database import get_db
 from app.repositories import ubicacion_repository
 from app.schemas.auth import UsuarioResponse
@@ -44,4 +44,6 @@ async def lookup_sector(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Sector no encontrado",
         )
+
+    await require_deposito_access(user, ubicacion.get("deposito_id"), db)
     return _ubicacion_response(ubicacion)

@@ -6,9 +6,14 @@ import aiosqlite
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import PlainTextResponse
 
-from app.api.v1.deps import get_current_user
+from app.api.v1.deps import (
+    get_current_user,
+    get_deposito_ids_for_user,
+    require_deposito_access,
+    require_deposito_role,
+)
 from app.core.database import get_db
-from app.repositories import movimiento_repository
+from app.repositories import movimiento_repository, ubicacion_repository, usuario_repository
 from app.schemas.auth import UsuarioResponse
 from app.schemas.movimiento import (
     MovimientoCreate,
@@ -57,6 +62,30 @@ async def create_movimiento(
     location's stock (or sums into Suelto) atomically inside a SQLite
     transaction with SQLITE_BUSY retry.
     """
+    ubicacion = await ubicacion_repository.get_ubicacion_by_id(db, data.ubicacion_id)
+    if ubicacion is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Ubicacion {data.ubicacion_id} no encontrada",
+        )
+
+    if not user.is_admin:
+        role = await usuario_repository.get_user_role_for_deposito(
+            db, user.id, ubicacion.get("deposito_id")
+        )
+        if role == "viewer":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="No tiene permiso para crear movimientos",
+            )
+
+    await require_deposito_role(
+        user,
+        ubicacion.get("deposito_id"),
+        db,
+        allowed_roles={"admin", "operator"},
+    )
+
     try:
         row = await movimiento_repository.create_movimiento(
             db,
@@ -112,7 +141,10 @@ async def list_movimientos(
         "limit": limit,
         "offset": offset,
     }
-    rows, total = await movimiento_repository.list_movimientos(db, filters)
+    deposito_ids = await get_deposito_ids_for_user(db, user)
+    rows, total = await movimiento_repository.list_movimientos(
+        db, filters, deposito_ids=deposito_ids
+    )
     return MovimientoListResponse(
         items=[_movimiento_response(row) for row in rows],
         total=total,
@@ -137,7 +169,10 @@ async def export_movimientos(
         "from_date": from_date,
         "to_date": to_date,
     }
-    csv_text = await movimiento_repository.export_movimientos_csv(db, filters)
+    deposito_ids = await get_deposito_ids_for_user(db, user)
+    csv_text = await movimiento_repository.export_movimientos_csv(
+        db, filters, deposito_ids=deposito_ids
+    )
     return PlainTextResponse(
         content=csv_text,
         media_type="text/csv; charset=utf-8",
@@ -158,4 +193,6 @@ async def get_movimiento(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Movimiento no encontrado",
         )
+
+    await require_deposito_access(user, row.get("deposito_id"), db)
     return _movimiento_response(row)
