@@ -304,11 +304,10 @@ async def download_estante_qrs_zip(
 async def print_estante_qrs(
     estante_id: int,
     per_page: int = Query(default=4),
-    size: int = Query(default_factory=lambda: get_settings().qr_default_size, ge=50, le=1000),
     db: aiosqlite.Connection = Depends(get_db),
     user: UsuarioResponse = Depends(get_current_user),
 ):
-    """Return a printable A4 PNG sheet with all QRs for an estante."""
+    """Return a printable multi-page A4 PDF with all QRs for an estante."""
     if per_page not in qr_service._VALID_PER_PAGE:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -322,12 +321,15 @@ async def print_estante_qrs(
             detail="Estante no encontrado",
         )
 
-    qr_items = await qr_service.generate_estante_qrs(estante_id, db, size)
-    png_bytes = await qr_service.generate_a4_print_sheet(qr_items, per_page, size)
+    # Generate QRs at the resolution required to fill the A4 cell cleanly.
+    qr_draw_size = qr_service._calculate_qr_display_size(per_page)[0]
+    qr_resolution = max(qr_draw_size, qr_service._MIN_QR_RESOLUTION)
+    qr_items = await qr_service.generate_estante_qrs(estante_id, db, qr_resolution)
+    pdf_bytes = await qr_service.generate_pdf_print_sheet(qr_items, per_page)
 
-    filename = f"qr_print_{estante['nombre']}.png"
+    filename = f"qr_print_{estante['nombre']}.pdf"
     return Response(
-        content=png_bytes,
-        media_type="image/png",
+        content=pdf_bytes,
+        media_type="application/pdf",
         headers={"Content-Disposition": f'inline; filename="{filename}"'},
     )

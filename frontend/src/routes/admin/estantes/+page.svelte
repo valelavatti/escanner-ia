@@ -10,6 +10,7 @@
 		assignProductToUbicacion,
 		unassignProductFromUbicacion,
 		searchProductos,
+		getUbicacionQR,
 		ApiError,
 		type Estante,
 		type Deposito,
@@ -355,7 +356,18 @@
 		}
 	}
 
+	async function handlePrintUbicacionQR(ubicacion: Ubicacion) {
+		try {
+			const blob = await getUbicacionQR(ubicacion.id, 1000);
+			const url = URL.createObjectURL(blob);
+			window.open(url, '_blank');
+		} catch (err) {
+			showMessage(err instanceof Error ? err.message : 'Error al generar el QR', 'error');
+		}
+	}
+
 	const activeUbicaciones = $derived(selectedUbicaciones.filter((u) => u.estado === 'activo'));
+	const isSueltoShelf = $derived(selectedEstante?.nombre === SYSTEM_SHELF_NAME);
 </script>
 
 <section class="estantes-page">
@@ -496,22 +508,36 @@
 							<span class="cell__product">{ubicacion.producto_sku}</span>
 							<span class="cell__desc">{ubicacion.producto_descripcion ?? ''}</span>
 							<span class="cell__stock">Stock: {ubicacion.stock_actual}</span>
-							{#if selectedEstante.nombre !== SYSTEM_SHELF_NAME}
-								<button
-									class="button button--small button--danger"
-									onclick={() => handleUnassign(ubicacion.id)}
-								>
-									Desasignar
-								</button>
+						{/if}
+
+						{#if !isSueltoShelf}
+							{#if !ubicacion.producto_id}
+								<span class="cell__empty">vacío</span>
 							{/if}
-						{:else if selectedEstante.nombre !== SYSTEM_SHELF_NAME}
-							<span class="cell__empty">vacío</span>
-							<button
-								class="button button--small button--primary"
-								onclick={() => openAssign(ubicacion)}
-							>
-								Asignar producto
-							</button>
+							<div class="cell__actions">
+								{#if ubicacion.producto_id}
+									<button
+										class="button button--small button--danger"
+										onclick={() => handleUnassign(ubicacion.id)}
+									>
+										Desasignar
+									</button>
+								{:else}
+									<button
+										class="button button--small button--primary"
+										onclick={() => openAssign(ubicacion)}
+									>
+										Asignar producto
+									</button>
+								{/if}
+								<button
+									class="button button--small button--secondary"
+									onclick={() => handlePrintUbicacionQR(ubicacion)}
+									aria-label="Imprimir QR de {ubicacion.qr_valor}"
+								>
+									QR
+								</button>
+							</div>
 						{:else}
 							<span class="cell__empty">sistema</span>
 						{/if}
@@ -1017,6 +1043,14 @@
 	.cell__empty {
 		font-weight: 500;
 		text-transform: uppercase;
+	}
+
+	.cell__actions {
+		display: flex;
+		flex-wrap: wrap;
+		justify-content: center;
+		gap: 0.25rem;
+		margin-top: 0.25rem;
 	}
 
 	.modal-backdrop {

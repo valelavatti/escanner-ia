@@ -16,21 +16,12 @@
 	let { estante, onClose }: Props = $props();
 
 	let perPage = $state(4);
-	let qrSize = $state<'small' | 'medium' | 'large'>('medium');
 	let isGenerating = $state(false);
 	let isDownloading = $state(false);
 	let error = $state<string | null>(null);
 	let visible = $state(false);
 
-	const sizeOptions: { value: 'small' | 'medium' | 'large'; label: string; px: number }[] = [
-		{ value: 'small', label: 'Pequeño (150 px)', px: 150 },
-		{ value: 'medium', label: 'Mediano (200 px)', px: 200 },
-		{ value: 'large', label: 'Grande (300 px)', px: 300 }
-	];
-
 	const perPageOptions = [1, 2, 4, 6, 8, 9];
-
-	const sizeInPx = $derived(sizeOptions.find((o) => o.value === qrSize)?.px ?? 200);
 
 	const grid = $derived(getGrid(perPage));
 
@@ -68,38 +59,13 @@
 		error = null;
 
 		try {
-			const blob = await getEstanteQRPrintSheet(estante.id, perPage, sizeInPx);
+			const blob = await getEstanteQRPrintSheet(estante.id, perPage);
 			const blobUrl = URL.createObjectURL(blob);
 
 			if (browser) {
-				const printWindow = window.open('', '_blank');
-				if (printWindow) {
-					printWindow.document.write(`
-						<!DOCTYPE html>
-						<html lang="es">
-							<head>
-								<meta charset="utf-8" />
-								<title>Imprimir QRs — ${estante.nombre}</title>
-								<style>
-									* { box-sizing: border-box; }
-									body { margin: 0; padding: 0; background: #fff; }
-									img { display: block; width: 100%; height: auto; }
-									@media print {
-										body { margin: 0; }
-										img { page-break-inside: avoid; }
-									}
-								</style>
-							</head>
-							<body>
-								<img src="${blobUrl}" alt="Hoja A4 con códigos QR" onload="setTimeout(() => window.print(), 100)" />
-							</body>
-						</html>
-					`);
-					printWindow.document.close();
-				} else {
-					// Fallback if popup blocked
-					window.open(blobUrl, '_blank');
-				}
+				// Open the PDF in a new tab; the browser's native PDF viewer
+				// handles multi-page rendering and printing.
+				window.open(blobUrl, '_blank');
 			}
 		} catch (err) {
 			error = getErrorMessage(err);
@@ -185,18 +151,6 @@
 					<option value={option}>{option}</option>
 				{/each}
 			</select>
-
-			<label class="field-label" for="qr-size">Tamaño</label>
-			<select
-				id="qr-size"
-				class="field-input field-input--select"
-				bind:value={qrSize}
-				disabled={isGenerating || isDownloading}
-			>
-				{#each sizeOptions as option}
-					<option value={option.value}>{option.label}</option>
-				{/each}
-			</select>
 		</div>
 
 		<div class="qr-preview">
@@ -213,7 +167,7 @@
 				</div>
 			</div>
 			<p class="qr-preview__hint">
-				Vista previa: {grid.cols} × {grid.rows} · {sizeInPx} px
+				Vista previa: {grid.cols} × {grid.rows}
 			</p>
 		</div>
 
@@ -389,8 +343,6 @@
 	.qr-preview__qr {
 		width: 100%;
 		height: 100%;
-		max-width: 2.5rem;
-		max-height: 2.5rem;
 		background-color: #e2e8f0;
 		border-radius: 0.25rem;
 	}

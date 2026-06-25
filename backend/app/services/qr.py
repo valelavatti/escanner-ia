@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import BinaryIO
 
 import qrcode
+from fpdf import FPDF
 from PIL import Image, ImageDraw, ImageFont
 
 from app.core.config import get_settings
@@ -22,6 +23,10 @@ _CONTENT_W = PAGE_W - 2 * MARGIN
 _CONTENT_H = PAGE_H - 2 * MARGIN
 
 _VALID_PER_PAGE = {1, 2, 4, 6, 8, 9}
+
+# Minimum QR image resolution used when generating cached PNGs for print sheets.
+# The actual display size on the A4 page is calculated from per_page.
+_MIN_QR_RESOLUTION = 300
 
 
 def _sanitize_qr_valor(qr_valor: str) -> str:
@@ -135,10 +140,22 @@ def _get_grid_layout(per_page: int) -> tuple[int, int]:
     return mapping[per_page]
 
 
+def _calculate_qr_display_size(per_page: int) -> tuple[int, int]:
+    """Return the (width, height) in pixels that the QR should fill on A4.
+
+    The size is derived from the available cell space so the QR fills the
+    page area, regardless of the original ``size`` resolution parameter.
+    """
+    cols, rows = _get_grid_layout(per_page)
+    cell_w = (_CONTENT_W - (cols - 1) * GAP) / cols
+    cell_h = (_CONTENT_H - (rows - 1) * GAP) / rows
+    qr_size = int(min(cell_w, cell_h - LABEL_H))
+    return (qr_size, qr_size)
+
+
 def _build_single_a4_page(
     qr_items: list[tuple[str, bytes]],
     per_page: int,
-    qr_size: int,
 ) -> Image:
     """Compose one A4 page from the first ``per_page`` QR items."""
     page = Image.new("RGB", (PAGE_W, PAGE_H), "white")
@@ -148,7 +165,7 @@ def _build_single_a4_page(
     cols, rows = _get_grid_layout(per_page)
     cell_w = (_CONTENT_W - (cols - 1) * GAP) / cols
     cell_h = (_CONTENT_H - (rows - 1) * GAP) / rows
-    qr_draw_size = int(min(qr_size, cell_w, cell_h - LABEL_H))
+    qr_draw_size = _calculate_qr_display_size(per_page)[0]
 
     for idx, (qr_valor, png_bytes) in enumerate(qr_items[:per_page]):
         col = idx % cols
@@ -177,7 +194,6 @@ def _build_single_a4_page(
 def _build_a4_sheet(
     qr_items: list[tuple[str, bytes]],
     per_page: int,
-    qr_size: int,
 ) -> Image:
     """Stack A4 pages vertically until all QR items are laid out."""
     if not qr_items:
@@ -186,7 +202,7 @@ def _build_a4_sheet(
     pages: list[Image] = []
     for start in range(0, len(qr_items), per_page):
         chunk = qr_items[start : start + per_page]
-        pages.append(_build_single_a4_page(chunk, per_page, qr_size))
+        pages.append(_build_single_a4_page(chunk, per_page))
 
     if len(pages) == 1:
         return pages[0]
@@ -199,6 +215,63 @@ def _build_a4_sheet(
         y_offset += page.height
 
     return sheet
+
+
+# A4 dimensions in millimeters, used for PDF output.
+_A4_W_MM = 210.0
+_A4_H_MM = 297.0
+
+
+def _pdf_cell_layout(per_page: int) -> tuple[int, int, float, float, float, float]:
+    """Return PDF layout values: (cols, rows, cell_w_mm, cell_h_mm, gap_mm, margin_mm)."""
+    cols, rows = _get_grid_layout(per_page)
+    margin_mm = MARGIN / PAGE_W * _A4_W_MM
+    gap_mm = GAP / PAGE_W * _A4_W_MM
+    content_w = _A4_W_MM - 2 * margin_mm
+    content_h = _A4_H_MM - 2 * margin_mm
+    cell_w = (content_w - (cols - 1) * gap_mm) / cols
+    cell_h = (content_h - (rows - 1) * gap_mm) / rows
+    return cols, rows, cell_w, cell_h, gap_mm, margin_mm
+
+
+def _build_pdf(qr_items: list[tuple[str, bytes]], per_page: int) -> bytes:
+    """Compose a multi-page A4 PDF with QRs and return it as bytes."""
+    cols, rows, cell_w, cell_h, gap, margin = _pdf_cell_layout(per_page)
+    qr_size_mm = min(cell_w, cell_h - (LABEL_H / PAGE_W * _A4_W_MM))
+    label_h_mm = LABEL_H / PAGE_W * _A4_W_MM
+
+    pdf = FPDF(orientation="P", unit="mm", format="A4")
+    pdf.set_auto_page_break(False)
+    pdf.set_fill_color(255, 255, 255)
+
+    font_size = max(8, int(label_h_mm * 1.5))
+    pdf.set_font("Arial", size=font_size)
+
+    for start in range(0, len(qr_items), per_page):
+        pdf.add_page()
+        chunk = qr_items[start : start + per_page]
+
+        for idx, (qr_valor, png_bytes) in enumerate(chunk):
+            col = idx % cols
+            row = idx // cols
+
+            cell_left = margin + col * (cell_w + gap)
+            cell_top = margin + row * (cell_h + gap)
+            x = cell_left + (cell_w - qr_size_mm) / 2
+            y = cell_top + (cell_h - label_h_mm - qr_size_mm) / 2
+
+            pdf.image(BytesIO(png_bytes), x=x, y=y, w=qr_size_mm, h=qr_size_mm)
+
+            # Center the label below the QR.
+            label_y = y + qr_size_mm + 1.0
+            text_width = pdf.get_string_width(qr_valor)
+            text_x = cell_left + (cell_w - text_width) / 2
+            pdf.set_xy(text_x, label_y)
+            pdf.cell(text_width, label_h_mm, qr_valor, align="C")
+
+    buffer: BinaryIO = BytesIO()
+    pdf.output(buffer)
+    return buffer.getvalue()
 
 
 async def generate_estante_qrs(
@@ -222,16 +295,26 @@ async def generate_estante_qrs(
 async def generate_a4_print_sheet(
     qr_items: list[tuple[str, bytes]],
     per_page: int,
-    qr_size: int,
 ) -> bytes:
     """Return a printable A4 PNG (possibly multi-page) as bytes."""
     if per_page not in _VALID_PER_PAGE:
         raise ValueError(f"per_page must be one of {sorted(_VALID_PER_PAGE)}")
 
     def _compose() -> bytes:
-        sheet = _build_a4_sheet(qr_items, per_page, qr_size)
+        sheet = _build_a4_sheet(qr_items, per_page)
         buffer: BinaryIO = BytesIO()
         sheet.save(buffer, format="PNG")
         return buffer.getvalue()
 
     return await asyncio.to_thread(_compose)
+
+
+async def generate_pdf_print_sheet(
+    qr_items: list[tuple[str, bytes]],
+    per_page: int,
+) -> bytes:
+    """Return a multi-page A4 PDF with all QRs as bytes."""
+    if per_page not in _VALID_PER_PAGE:
+        raise ValueError(f"per_page must be one of {sorted(_VALID_PER_PAGE)}")
+
+    return await asyncio.to_thread(_build_pdf, qr_items, per_page)

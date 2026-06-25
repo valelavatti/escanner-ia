@@ -473,12 +473,11 @@ export async function downloadEstanteQRsZip(estanteId: number): Promise<Blob> {
 
 export async function getEstanteQRPrintSheet(
 	estanteId: number,
-	perPage: number,
-	size: number
+	perPage: number
 ): Promise<Blob> {
 	const response = await authenticatedBlobFetch(
-		`/estantes/${estanteId}/qrs/print?per_page=${perPage}&size=${size}`,
-		'image/png'
+		`/estantes/${estanteId}/qrs/print?per_page=${perPage}`,
+		'application/pdf'
 	);
 
 	if (!response.ok) {

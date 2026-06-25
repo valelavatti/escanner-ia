@@ -104,7 +104,7 @@ async def unassign_producto_from_ubicacion(
 @router.get("/{ubicacion_id}/qr.png")
 async def get_ubicacion_qr_png(
     ubicacion_id: int,
-    size: int = Query(default_factory=lambda: get_settings().qr_default_size, ge=50, le=1000),
+    size: int = Query(default_factory=lambda: get_settings().qr_default_size, ge=50, le=2000),
     db: aiosqlite.Connection = Depends(get_db),
     user: UsuarioResponse = Depends(get_current_user),
 ):
