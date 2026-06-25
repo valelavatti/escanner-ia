@@ -1,12 +1,16 @@
 """Estante (shelf) administration endpoints."""
 
+import asyncio
+import zipfile
+from io import BytesIO
 from sqlite3 import IntegrityError
 from typing import Optional
 
 import aiosqlite
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from app.api.v1.deps import get_current_user
+from app.core.config import get_settings
 from app.core.database import get_db
 from app.repositories import estante_repository, ubicacion_repository
 from app.schemas.auth import UsuarioResponse
@@ -20,6 +24,7 @@ from app.schemas.estante import (
     EstanteUpdateResponse,
     UbicacionResponse,
 )
+from app.services import qr as qr_service
 
 router = APIRouter()
 depositos_router = APIRouter()
@@ -258,3 +263,71 @@ async def list_ubicaciones_for_estante(
 
     ubicaciones = await ubicacion_repository.list_ubicaciones_by_estante(db, estante_id)
     return [_ubicacion_response(u) for u in ubicaciones]
+
+
+@router.get("/{estante_id}/qrs")
+async def download_estante_qrs_zip(
+    estante_id: int,
+    db: aiosqlite.Connection = Depends(get_db),
+    user: UsuarioResponse = Depends(get_current_user),
+):
+    """Download all QR codes for an estante as a ZIP archive."""
+    estante = await estante_repository.get_estante_by_id(db, estante_id)
+    if estante is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Estante no encontrado",
+        )
+
+    qr_items = await qr_service.generate_estante_qrs(
+        estante_id, db, get_settings().qr_default_size
+    )
+
+    def _build_zip() -> bytes:
+        buffer = BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            for qr_valor, png_bytes in qr_items:
+                filename = f"{qr_service._sanitize_qr_valor(qr_valor)}.png"
+                archive.writestr(filename, png_bytes)
+        return buffer.getvalue()
+
+    zip_bytes = await asyncio.to_thread(_build_zip)
+    filename = f"qr_{estante['nombre']}.zip"
+    return Response(
+        content=zip_bytes,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/{estante_id}/qrs/print")
+async def print_estante_qrs(
+    estante_id: int,
+    per_page: int = Query(default=4),
+    size: int = Query(default_factory=lambda: get_settings().qr_default_size, ge=50, le=1000),
+    db: aiosqlite.Connection = Depends(get_db),
+    user: UsuarioResponse = Depends(get_current_user),
+):
+    """Return a printable A4 PNG sheet with all QRs for an estante."""
+    if per_page not in qr_service._VALID_PER_PAGE:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"per_page debe ser uno de: {sorted(qr_service._VALID_PER_PAGE)}",
+        )
+
+    estante = await estante_repository.get_estante_by_id(db, estante_id)
+    if estante is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Estante no encontrado",
+        )
+
+    qr_items = await qr_service.generate_estante_qrs(estante_id, db, size)
+    png_bytes = await qr_service.generate_a4_print_sheet(qr_items, per_page, size)
+
+    filename = f"qr_print_{estante['nombre']}.png"
+    return Response(
+        content=png_bytes,
+        media_type="image/png",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )

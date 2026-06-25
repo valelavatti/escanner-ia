@@ -6,3 +6,4 @@ python-multipart>=0.0.12
 pandas>=2.2.0
 openpyxl>=3.1.0
 aiosqlite>=0.20.0
+qrcode[pil]==8.0

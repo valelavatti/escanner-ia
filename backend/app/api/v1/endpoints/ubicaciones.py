@@ -1,13 +1,15 @@
 """Ubicacion (shelf cell) endpoints."""
 
 import aiosqlite
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from app.api.v1.deps import get_current_user
+from app.core.config import get_settings
 from app.core.database import get_db
 from app.repositories import ubicacion_repository
 from app.schemas.auth import UsuarioResponse
 from app.schemas.estante import UbicacionAssignRequest, UbicacionResponse
+from app.services import qr as qr_service
 
 router = APIRouter()
 
@@ -97,3 +99,22 @@ async def unassign_producto_from_ubicacion(
     await ubicacion_repository.unassign_producto_from_ubicacion(db, ubicacion_id, user.id)
     updated = await ubicacion_repository.get_ubicacion_by_id(db, ubicacion_id)
     return _ubicacion_response(updated)
+
+
+@router.get("/{ubicacion_id}/qr.png")
+async def get_ubicacion_qr_png(
+    ubicacion_id: int,
+    size: int = Query(default_factory=lambda: get_settings().qr_default_size, ge=50, le=1000),
+    db: aiosqlite.Connection = Depends(get_db),
+    user: UsuarioResponse = Depends(get_current_user),
+):
+    """Return the QR PNG for a single ubicacion."""
+    ubicacion = await ubicacion_repository.get_ubicacion_by_id(db, ubicacion_id)
+    if ubicacion is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ubicacion no encontrada",
+        )
+
+    png_bytes = await qr_service.get_or_create_qr_bytes(ubicacion["qr_valor"], size)
+    return Response(content=png_bytes, media_type="image/png")

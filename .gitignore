@@ -26,3 +26,6 @@ frontend/build/
 # IDEs
 .vscode/
 .idea/
+
+# QR cache
+qr_cache/

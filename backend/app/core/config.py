@@ -7,6 +7,8 @@ class Settings(BaseSettings):
     """Application settings loaded from environment / .env file."""
 
     db_path: str = "./app.db"
+    qr_cache_dir: str = "./qr_cache/"
+    qr_default_size: int = 200
     session_secret: str = "changeme"
     cors_origins: str = "http://localhost:5173"
 
