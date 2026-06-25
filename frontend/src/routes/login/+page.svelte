@@ -23,7 +23,10 @@
 		loading = true;
 		try {
 			const loginData = await login(trimmedNombre, trimmedPassword);
+			// Store token FIRST so me() can authenticate
+			setSession(loginData.token, loginData.usuario, loginData.expires_at, []);
 			const meData = await me();
+			// Update with depositos from /me
 			setSession(loginData.token, loginData.usuario, loginData.expires_at, meData.depositos);
 			goto('/');
 		} catch (/** @type {any} */ e) {
