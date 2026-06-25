@@ -1,90 +1,80 @@
 <script>
 	import { goto } from '$app/navigation';
-	import { listUsuarios, login } from '$lib/api/client';
+	import { login, me, ApiError } from '$lib/api/client';
 	import { setSession } from '$lib/stores/session';
 
 	let nombre = $state('');
+	let password = $state('');
 	let errorMsg = $state('');
-	/** @type {Array<{id: number, nombre: string}>} */
-	let users = $state([]);
-	let loading = $state(true);
-
-	async function loadUsers() {
-		try {
-			users = await listUsuarios();
-		} catch (e) {
-			errorMsg = 'No se pudo cargar la lista de usuarios';
-		} finally {
-			loading = false;
-		}
-	}
-
-	/** @param {string} userNombre */
-	async function selectUser(userNombre) {
-		errorMsg = '';
-		try {
-			const data = await login(userNombre);
-			setSession(data.token, data.usuario, data.expires_at);
-			goto('/');
-		} catch (/** @type {any} */ e) {
-			errorMsg = e.message || 'Error al iniciar sesión';
-		}
-	}
+	let loading = $state(false);
 
 	/** @param {SubmitEvent} e */
 	async function handleSubmit(e) {
 		e.preventDefault();
 		errorMsg = '';
-		const trimmed = nombre.trim();
-		if (!trimmed) {
-			errorMsg = 'Ingrese un nombre';
+		const trimmedNombre = nombre.trim();
+		const trimmedPassword = password.trim();
+
+		if (!trimmedNombre || !trimmedPassword) {
+			errorMsg = 'Ingrese usuario y contraseña';
 			return;
 		}
-		await selectUser(trimmed);
-	}
 
-	loadUsers();
+		loading = true;
+		try {
+			const loginData = await login(trimmedNombre, trimmedPassword);
+			const meData = await me();
+			setSession(loginData.token, loginData.usuario, loginData.expires_at, meData.depositos);
+			goto('/');
+		} catch (/** @type {any} */ e) {
+			if (e instanceof ApiError && e.status === 401) {
+				const message = e.message || '';
+				if (message.toLowerCase().includes('sin contraseña')) {
+					errorMsg = 'Usuario sin contraseña. Contacte al administrador.';
+				} else {
+					errorMsg = 'Usuario o contraseña incorrectos';
+				}
+			} else {
+				errorMsg = e.message || 'Error al iniciar sesión';
+			}
+		} finally {
+			loading = false;
+		}
+	}
 </script>
 
 <section class="login">
 	<h1>ASG Scanner</h1>
-	<p class="subtitle">Seleccione su usuario para continuar</p>
+	<p class="subtitle">Ingrese usuario y contraseña</p>
 
-	{#if loading}
-		<p>Cargando usuarios...</p>
-	{:else}
-		<form onsubmit={handleSubmit}>
-			<label for="nombre">Nombre</label>
-			<input
-				id="nombre"
-				type="text"
-				bind:value={nombre}
-				placeholder="Escriba o toque un nombre"
-				autocomplete="name"
-			/>
-			<button type="submit" disabled={!nombre.trim()}>Ingresar</button>
-		</form>
+	<form onsubmit={handleSubmit}>
+		<label for="nombre">Usuario</label>
+		<input
+			id="nombre"
+			type="text"
+			bind:value={nombre}
+			placeholder="Nombre de usuario"
+			autocomplete="username"
+			disabled={loading}
+		/>
 
-		{#if users.length > 0}
-			<ul class="user-list" role="listbox" aria-label="Usuarios disponibles">
-				{#each users as user (user.id)}
-					<li>
-					<button
-						type="button"
-						role="option"
-						aria-selected={false}
-						onclick={() => selectUser(user.nombre)}
-					>
-						{user.nombre}
-					</button>
-					</li>
-				{/each}
-			</ul>
-		{/if}
+		<label for="password">Contraseña</label>
+		<input
+			id="password"
+			type="password"
+			bind:value={password}
+			placeholder="Contraseña"
+			autocomplete="current-password"
+			disabled={loading}
+		/>
 
-		{#if errorMsg}
-			<p class="error" role="alert">{errorMsg}</p>
-		{/if}
+		<button type="submit" disabled={loading || !nombre.trim() || !password.trim()}>
+			{loading ? 'Ingresando…' : 'Ingresar'}
+		</button>
+	</form>
+
+	{#if errorMsg}
+		<p class="error" role="alert">{errorMsg}</p>
 	{/if}
 </section>
 
@@ -95,10 +85,16 @@
 		gap: 1rem;
 		max-width: 28rem;
 		margin: 0 auto;
-		padding-top: 2rem;
+		padding: 2rem 1rem;
+	}
+
+	.login h1 {
+		margin: 0;
+		font-size: 1.75rem;
 	}
 
 	.subtitle {
+		margin: 0;
 		color: var(--color-text-muted, #6b7280);
 	}
 
@@ -113,47 +109,42 @@
 	}
 
 	input,
-	button[type='submit'],
-	.user-list button {
+	button[type='submit'] {
 		min-height: 48px;
-		padding: 0.75rem;
+		padding: 0.75rem 1rem;
 		font-size: 1rem;
 		border-radius: 0.5rem;
 	}
 
 	input {
 		border: 1px solid var(--color-border, #d1d5db);
+		background-color: #ffffff;
 	}
 
-	button {
+	button[type='submit'] {
 		border: none;
 		background: var(--color-primary, #0f172a);
 		color: white;
+		font-weight: 600;
 		cursor: pointer;
+		touch-action: manipulation;
 	}
 
-	button:disabled {
+	button[type='submit']:disabled {
 		opacity: 0.6;
 		cursor: not-allowed;
 	}
 
-	.user-list {
-		list-style: none;
-		padding: 0;
-		margin: 0;
-		display: flex;
-		flex-direction: column;
-		gap: 0.5rem;
-	}
-
-	.user-list button {
-		width: 100%;
-		text-align: left;
-		background: var(--color-surface, #f3f4f6);
-		color: var(--color-text, #111827);
+	button[type='submit']:not(:disabled):active {
+		background-color: #334155;
 	}
 
 	.error {
-		color: #dc2626;
+		margin: 0;
+		padding: 0.75rem 1rem;
+		color: #991b1b;
+		background-color: #fee2e2;
+		border-radius: 0.5rem;
+		font-weight: 500;
 	}
 </style>

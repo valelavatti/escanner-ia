@@ -4,11 +4,19 @@ import { browser } from '$app/environment';
 export interface UsuarioSession {
 	id: number;
 	nombre: string;
+	is_admin: boolean;
+}
+
+export interface DepositoAssignment {
+	deposito_id: number;
+	deposito_nombre: string;
+	role: 'admin' | 'operator' | 'viewer';
 }
 
 export interface UserSession {
 	token: string;
 	usuario: UsuarioSession;
+	depositos: DepositoAssignment[];
 	expires_at: string;
 }
 
@@ -47,9 +55,10 @@ export const sessionStore = createSessionStore();
 export function setSession(
 	token: string,
 	usuario: UsuarioSession,
-	expires_at: string
+	expires_at: string,
+	depositos: DepositoAssignment[] = []
 ): void {
-	sessionStore.set({ token, usuario, expires_at });
+	sessionStore.set({ token, usuario, depositos, expires_at });
 }
 
 export function clearSession(): void {

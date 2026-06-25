@@ -4,6 +4,7 @@
 	import Scanner from '$lib/components/Scanner.svelte';
 	import ProductCard from '$lib/components/ProductCard.svelte';
 	import { scannerState, anchoredLocation, type AnchoredLocation } from '$lib/stores/scanner';
+	import { sessionStore } from '$lib/stores/session';
 	import {
 		listEstantes,
 		listDepositos,
@@ -11,7 +12,8 @@
 		lookupSector,
 		getProductoByBarcodeWithStock,
 		getProductoStockTotal,
-		createMovimiento
+		createMovimiento,
+		ApiError
 	} from '$lib/api/client';
 	import type { Estante, Deposito, Ubicacion, ProductWithUbicacionStock } from '$lib/api/client';
 
@@ -99,7 +101,11 @@
 			clearScannedProduct();
 			showGreenFlash(`Ubicación anclada: ${ubicacion.estante_nombre} ${ubicacion.qr_valor}`);
 		} catch (err) {
-			showError(`QR no reconocido: ${qrValor} — no es un sector válido`);
+			if (err instanceof ApiError && err.status === 403) {
+				showError('No tenés permiso para este depósito');
+			} else {
+				showError(`QR no reconocido: ${qrValor} — no es un sector válido`);
+			}
 		}
 	}
 
@@ -185,8 +191,12 @@
 			quantity = 0;
 			scannerRef?.resume();
 		} catch (err) {
-			const message = err instanceof Error ? err.message : 'Error al guardar el movimiento';
-			showError(message);
+			if (err instanceof ApiError && err.status === 403) {
+				showError('No tenés permiso para crear movimientos');
+			} else {
+				const message = err instanceof Error ? err.message : 'Error al guardar el movimiento';
+				showError(message);
+			}
 		} finally {
 			isSaving = false;
 		}
@@ -235,7 +245,17 @@
 	async function loadEstantes() {
 		try {
 			if (depositos.length === 0) {
-				depositos = await listDepositos();
+				if ($sessionStore?.usuario.is_admin) {
+					depositos = await listDepositos();
+				} else if ($sessionStore) {
+					depositos = $sessionStore.depositos.map((d) => ({
+						id: d.deposito_id,
+						nombre: d.deposito_nombre
+					}));
+					if (selectedDepositoId == null && depositos.length > 0) {
+						selectedDepositoId = depositos[0].id;
+					}
+				}
 			}
 			const rows = await listEstantes(false, selectedDepositoId);
 			estantes = rows.filter((e) => !e.deleted_at);
@@ -343,6 +363,15 @@
 		</div>
 	{/if}
 
+	{#if $sessionStore && !$sessionStore.usuario.is_admin && $sessionStore.depositos.length > 0}
+		<div class="scanner-page__depositos">
+			<span>Depósitos:</span>
+			<span class="deposito-names">
+				{$sessionStore.depositos.map((d) => d.deposito_nombre).join(', ')}
+			</span>
+		</div>
+	{/if}
+
 	<div class="scanner-page__location" class:scanner-page__location--anchored={$anchoredLocation}>
 		{#if $anchoredLocation}
 			<span class="location-pin">📍</span>
@@ -408,7 +437,9 @@
 			<label class="modal__field">
 				Depósito
 				<select value={selectedDepositoId ?? ''} onchange={handleDepositoChange}>
-					<option value="">Todos</option>
+					{#if $sessionStore?.usuario.is_admin}
+						<option value="">Todos</option>
+					{/if}
 					{#each depositos as deposito}
 						<option value={deposito.id}>{deposito.nombre}</option>
 					{/each}
@@ -509,6 +540,22 @@
 		color: #334155;
 		background-color: #f1f5f9;
 		border-radius: 0.5rem;
+	}
+
+	.scanner-page__depositos {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+		padding: 0.5rem 0.75rem;
+		font-size: 0.875rem;
+		color: #475569;
+		background-color: #f8fafc;
+		border-radius: 0.5rem;
+	}
+
+	.deposito-names {
+		font-weight: 600;
+		color: #0f172a;
 	}
 
 	.scanner-page__location {

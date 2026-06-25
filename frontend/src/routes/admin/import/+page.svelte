@@ -1,5 +1,13 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
 	import { importExcel, ApiError, type ImportSummary } from '$lib/api/client';
+	import { sessionStore } from '$lib/stores/session';
+
+	$effect(() => {
+		if ($sessionStore && !$sessionStore.usuario.is_admin) {
+			goto('/');
+		}
+	});
 
 	let file = $state<File | null>(null);
 	let strategy = $state<'error' | 'skip' | 'overwrite'>('error');

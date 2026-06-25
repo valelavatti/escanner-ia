@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
+	import { sessionStore } from '$lib/stores/session';
 	import {
 		listEstantes,
 		listDepositos,
@@ -70,7 +71,6 @@
 	let assigning = $state(false);
 
 	const SYSTEM_SHELF_NAME = 'Suelto';
-	const CENTRAL_DEPOSITO_NAME = 'Depósito Central';
 
 	loadDepositos();
 	loadEstantes();
@@ -144,10 +144,16 @@
 
 	async function loadDepositos() {
 		try {
-			depositos = await listDepositos();
-			const central = depositos.find((d) => d.nombre === CENTRAL_DEPOSITO_NAME);
-			if (central) {
-				createDepositoId = central.id;
+			if ($sessionStore?.usuario.is_admin) {
+				depositos = await listDepositos();
+			} else if ($sessionStore) {
+				depositos = $sessionStore.depositos.map((d) => ({
+					id: d.deposito_id,
+					nombre: d.deposito_nombre
+				}));
+			}
+			if (depositos.length > 0 && createDepositoId == null) {
+				createDepositoId = depositos[0].id;
 			}
 		} catch (err) {
 			showMessage(err instanceof Error ? err.message : 'Error al cargar depósitos', 'error');
@@ -191,7 +197,7 @@
 		createOrden = 0;
 		createFilas = 1;
 		createColumnas = 1;
-		createDepositoId = depositos.find((d) => d.nombre === CENTRAL_DEPOSITO_NAME)?.id ?? null;
+		createDepositoId = depositos.length > 0 ? depositos[0].id : null;
 		createOpen = false;
 	}
 
@@ -443,7 +449,9 @@
 			}}
 			disabled={loading}
 		>
-			<option value="">Todos</option>
+			{#if $sessionStore?.usuario.is_admin}
+				<option value="">Todos</option>
+			{/if}
 			{#each depositos as deposito}
 				<option value={deposito.id}>{deposito.nombre}</option>
 			{/each}

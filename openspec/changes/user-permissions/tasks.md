@@ -264,11 +264,11 @@
 - **Files to create/modify**:
   - Modify `frontend/src/lib/stores/session.ts`
 - **Acceptance criteria**:
-  - [ ] `UsuarioSession` includes `is_admin: boolean`.
-  - [ ] `DepositoAssignment` type added with `deposito_id`, `nombre`, `role`.
-  - [ ] `UserSession` includes `usuario`, `depositos`, `token`, `expires_at`.
-  - [ ] `setSession` signature accepts `depositos` and stores them in the store/localStorage.
-  - [ ] Existing login flow using the old signature is updated or shimmed.
+  - [x] `UsuarioSession` includes `is_admin: boolean`.
+  - [x] `DepositoAssignment` type added with `deposito_id`, `nombre`, `role`.
+  - [x] `UserSession` includes `usuario`, `depositos`, `token`, `expires_at`.
+  - [x] `setSession` signature accepts `depositos` and stores them in the store/localStorage.
+  - [x] Existing login flow using the old signature is updated or shimmed.
 - **Estimated lines**: 30
 - **PR slice**: PR 3
 
@@ -279,11 +279,11 @@
 - **Files to create/modify**:
   - Modify `frontend/src/lib/api/client.ts`
 - **Acceptance criteria**:
-  - [ ] `login(nombre, password)` sends both fields.
-  - [ ] `me()` returns `usuario` (with `is_admin`) and `depositos`.
-  - [ ] Adds `listUsuarios`, `createUsuario`, `updateUsuario`, `deleteUsuario`.
-  - [ ] Adds `listUsuarioDepositos`, `assignUsuarioDeposito`, `removeUsuarioDeposito`.
-  - [ ] New TypeScript types for `Usuario`, `UsuarioCreate`, `UsuarioUpdate`, `DepositoAssignment`, `AssignDepositoRequest`.
+  - [x] `login(nombre, password)` sends both fields.
+  - [x] `me()` returns `usuario` (with `is_admin`) and `depositos`.
+  - [x] Adds `listUsuarios`, `createUsuario`, `updateUsuario`, `deleteUsuario`.
+  - [x] Adds `listUsuarioDepositos`, `assignUsuarioDeposito`, `removeUsuarioDeposito`.
+  - [x] New TypeScript types for `Usuario`, `UsuarioCreate`, `UsuarioUpdate`, `DepositoAssignment`, `AssignDepositoRequest`.
 - **Estimated lines**: 90
 - **PR slice**: PR 3
 
@@ -294,12 +294,12 @@
 - **Files to create/modify**:
   - Modify `frontend/src/routes/login/+page.svelte`
 - **Acceptance criteria**:
-  - [ ] Removes public user list and `listUsuarios` call from login flow.
-  - [ ] Shows username and password inputs.
-  - [ ] Calls `login(nombre, password)` and then `me()` to populate `depositos`.
-  - [ ] Stores full session including `depositos` and redirects to `/`.
-  - [ ] Displays backend error messages clearly.
-  - [ ] Touch targets and inputs remain mobile-friendly (min 48px).
+  - [x] Removes public user list and `listUsuarios` call from login flow.
+  - [x] Shows username and password inputs.
+  - [x] Calls `login(nombre, password)` and then `me()` to populate `depositos`.
+  - [x] Stores full session including `depositos` and redirects to `/`.
+  - [x] Displays backend error messages clearly.
+  - [x] Touch targets and inputs remain mobile-friendly (min 48px).
 - **Estimated lines**: 70
 - **PR slice**: PR 3
 
@@ -310,9 +310,9 @@
 - **Files to create/modify**:
   - Modify `frontend/src/routes/+page.svelte`
 - **Acceptance criteria**:
-  - [ ] `Gestionar usuarios` link visible only when `$sessionStore.usuario.is_admin`.
-  - [ ] `Importar productos` link visible only when `$sessionStore.usuario.is_admin`.
-  - [ ] `Escanear`, `Ver mapa`, `Historial`, and `Gestionar estantes` remain visible for all authenticated users.
+  - [x] `Gestionar usuarios` link visible only when `$sessionStore.usuario.is_admin`.
+  - [x] `Importar productos` link visible only when `$sessionStore.usuario.is_admin`.
+  - [x] `Escanear`, `Ver mapa`, `Historial`, and `Gestionar estantes` remain visible for all authenticated users.
 - **Estimated lines**: 20
 - **PR slice**: PR 3
 
@@ -324,9 +324,9 @@
   - Modify `frontend/src/routes/+layout.svelte`
   - Modify `frontend/src/routes/admin/+layout.svelte`
 - **Acceptance criteria**:
-  - [ ] Root layout still redirects unauthenticated users to `/login`.
-  - [ ] Admin layout (or root layout) redirects non-admin users away from `/admin/*` routes.
-  - [ ] Adds `Usuarios` tab to admin navigation for admins.
+  - [x] Root layout still redirects unauthenticated users to `/login`.
+  - [x] Admin layout (or root layout) redirects non-admin users away from `/admin/*` routes.
+  - [x] Adds `Usuarios` tab to admin navigation for admins.
 - **Estimated lines**: 30
 - **PR slice**: PR 3
 
@@ -337,13 +337,13 @@
 - **Files to create/modify**:
   - Create `frontend/src/routes/admin/usuarios/+page.svelte`
 - **Acceptance criteria**:
-  - [ ] Visible only to admins (client-side guard).
-  - [ ] Lists users with `id`, `nombre`, `is_admin` badge, and depósito count.
-  - [ ] Create-user form with `nombre`, `password`, `is_admin`.
-  - [ ] Edit-user modal to change `nombre`, reset password, toggle `is_admin`.
-  - [ ] Delete user with confirmation; blocks self-delete and last-admin-delete client-side.
-  - [ ] Per-user depósito management: list assignments, add assignment (`deposito_id`, `role` dropdown), remove assignment.
-  - [ ] Mobile-first layout, readable forms, touch-friendly controls.
+  - [x] Visible only to admins (client-side guard).
+  - [x] Lists users with `id`, `nombre`, `is_admin` badge, and depósito count.
+  - [x] Create-user form with `nombre`, `password`, `is_admin`.
+  - [x] Edit-user modal to change `nombre`, reset password, toggle `is_admin`.
+  - [x] Delete user with confirmation; blocks self-delete and last-admin-delete client-side.
+  - [x] Per-user depósito management: list assignments, add assignment (`deposito_id`, `role` dropdown), remove assignment.
+  - [x] Mobile-first layout, readable forms, touch-friendly controls.
 - **Estimated lines**: 220
 - **PR slice**: PR 3
 
@@ -354,11 +354,11 @@
 - **Files to create/modify**:
   - Modify `frontend/src/routes/scanner/+page.svelte`
 - **Acceptance criteria**:
-  - [ ] Manual location modal's depósito dropdown shows only depósitos from `$sessionStore.depositos`.
-  - [ ] Estante list is filtered by the selected accessible depósito.
-  - [ ] QR scan handles `403` from `lookupSector` with red flash `"No tenés permiso para este depósito"` and does not anchor the location.
-  - [ ] `createMovimiento` `403` shows a red flash.
-  - [ ] Displays the names of the user's assigned depósitos near the status area.
+  - [x] Manual location modal's depósito dropdown shows only depósitos from `$sessionStore.depositos`.
+  - [x] Estante list is filtered by the selected accessible depósito.
+  - [x] QR scan handles `403` from `lookupSector` with red flash `"No tenés permiso para este depósito"` and does not anchor the location.
+  - [x] `createMovimiento` `403` shows a red flash.
+  - [x] Displays the names of the user's assigned depósitos near the status area.
 - **Estimated lines**: 90
 - **PR slice**: PR 3
 
@@ -369,10 +369,10 @@
 - **Files to create/modify**:
   - Modify `frontend/src/routes/admin/estantes/+page.svelte`
 - **Acceptance criteria**:
-  - [ ] Depósito filter dropdown shows only accessible depósitos (`$sessionStore.depositos`).
-  - [ ] Create estante modal's depósito dropdown shows only accessible depósitos.
-  - [ ] Default depósito for non-admins is the first accessible depósito, not hard-coded Depósito Central.
-  - [ ] List remains filtered server-side; client does not leak unauthorized depósitos in dropdowns.
+  - [x] Depósito filter dropdown shows only accessible depósitos (`$sessionStore.depositos`).
+  - [x] Create estante modal's depósito dropdown shows only accessible depósitos.
+  - [x] Default depósito for non-admins is the first accessible depósito, not hard-coded Depósito Central.
+  - [x] List remains filtered server-side; client does not leak unauthorized depósitos in dropdowns.
 - **Estimated lines**: 40
 - **PR slice**: PR 3
 

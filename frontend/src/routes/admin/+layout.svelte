@@ -1,29 +1,40 @@
 <script>
+	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
+	import { sessionStore } from '$lib/stores/session';
 
 	let { children } = $props();
 
 	const tabs = [
 		{ path: '/admin/import', label: 'Importar' },
-		{ path: '/admin/estantes', label: 'Estantes' }
+		{ path: '/admin/estantes', label: 'Estantes' },
+		{ path: '/admin/usuarios', label: 'Usuarios' }
 	];
+
+	$effect(() => {
+		if ($sessionStore && !$sessionStore.usuario.is_admin) {
+			goto('/');
+		}
+	});
 </script>
 
-<div class="admin-layout">
-	<nav class="admin-nav" aria-label="Admin">
-		{#each tabs as tab}
-			<a
-				href={tab.path}
-				class="admin-nav__link"
-				class:admin-nav__link--active={$page.url.pathname === tab.path}
-			>
-				{tab.label}
-			</a>
-		{/each}
-	</nav>
+{#if $sessionStore?.usuario.is_admin}
+	<div class="admin-layout">
+		<nav class="admin-nav" aria-label="Admin">
+			{#each tabs as tab}
+				<a
+					href={tab.path}
+					class="admin-nav__link"
+					class:admin-nav__link--active={$page.url.pathname === tab.path}
+				>
+					{tab.label}
+				</a>
+			{/each}
+		</nav>
 
-	{@render children()}
-</div>
+		{@render children()}
+	</div>
+{/if}
 
 <style>
 	.admin-layout {

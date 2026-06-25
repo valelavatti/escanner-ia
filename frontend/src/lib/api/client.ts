@@ -67,14 +67,22 @@ async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
 	return response.json() as Promise<T>;
 }
 
-export async function login(nombre: string) {
-	return api<{
-		token: string;
-		usuario: { id: number; nombre: string };
-		expires_at: string;
-	}>('/auth/login', {
+export interface LoginResponse {
+	token: string;
+	usuario: { id: number; nombre: string; is_admin: boolean };
+	expires_at: string;
+}
+
+export interface DepositoAssignment {
+	deposito_id: number;
+	deposito_nombre: string;
+	role: 'admin' | 'operator' | 'viewer';
+}
+
+export async function login(nombre: string, password: string): Promise<LoginResponse> {
+	return api<LoginResponse>('/auth/login', {
 		method: 'POST',
-		body: JSON.stringify({ nombre })
+		body: JSON.stringify({ nombre, password })
 	});
 }
 
@@ -82,12 +90,83 @@ export async function logout() {
 	return api<{ ok: boolean }>('/auth/logout', { method: 'POST' });
 }
 
-export async function me() {
-	return api<{ usuario: { id: number; nombre: string } }>('/auth/me');
+export interface MeResponse {
+	usuario: { id: number; nombre: string; is_admin: boolean };
+	depositos: DepositoAssignment[];
 }
 
-export async function listUsuarios() {
-	return api<Array<{ id: number; nombre: string }>>('/usuarios');
+export async function me(): Promise<MeResponse> {
+	return api<MeResponse>('/auth/me');
+}
+
+// User management types (admin only)
+export interface UsuarioResponse {
+	id: number;
+	nombre: string;
+	is_admin: boolean;
+}
+
+export interface UsuarioWithDepositos extends UsuarioResponse {
+	depositos: DepositoAssignment[];
+}
+
+export interface UsuarioCreate {
+	nombre: string;
+	password: string;
+	is_admin: boolean;
+}
+
+export interface UsuarioUpdate {
+	nombre?: string;
+	password?: string;
+	is_admin?: boolean;
+}
+
+export interface AssignDepositoRequest {
+	deposito_id: number;
+	role: 'admin' | 'operator' | 'viewer';
+}
+
+export async function listUsuarios(): Promise<UsuarioWithDepositos[]> {
+	return api<UsuarioWithDepositos[]>('/usuarios');
+}
+
+export async function createUsuario(data: UsuarioCreate): Promise<UsuarioResponse> {
+	return api<UsuarioResponse>('/usuarios', {
+		method: 'POST',
+		body: JSON.stringify(data)
+	});
+}
+
+export async function updateUsuario(id: number, data: UsuarioUpdate): Promise<UsuarioResponse> {
+	return api<UsuarioResponse>(`/usuarios/${id}`, {
+		method: 'PUT',
+		body: JSON.stringify(data)
+	});
+}
+
+export async function deleteUsuario(id: number): Promise<void> {
+	await api<{ ok: boolean }>(`/usuarios/${id}`, { method: 'DELETE' });
+}
+
+export async function getUsuarioDepositos(usuarioId: number): Promise<DepositoAssignment[]> {
+	return api<DepositoAssignment[]>(`/usuarios/${usuarioId}/depositos`);
+}
+
+export async function assignUsuarioDeposito(
+	usuarioId: number,
+	data: AssignDepositoRequest
+): Promise<void> {
+	await api<{ ok: boolean }>(`/usuarios/${usuarioId}/depositos`, {
+		method: 'POST',
+		body: JSON.stringify(data)
+	});
+}
+
+export async function removeUsuarioDeposito(usuarioId: number, depositoId: number): Promise<void> {
+	await api<{ ok: boolean }>(`/usuarios/${usuarioId}/depositos/${depositoId}`, {
+		method: 'DELETE'
+	});
 }
 
 // Types matching backend ImportSummaryResponse
