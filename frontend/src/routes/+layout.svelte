@@ -34,7 +34,14 @@
 <div class="app">
 	{#if $sessionStore && $page.url.pathname !== '/login'}
 		<header class="app__header">
-			<span class="app__user">{$sessionStore.usuario.nombre}</span>
+			<div class="app__nav">
+				{#if $page.url.pathname !== '/'}
+					<button class="app__back" onclick={() => goto('/')} aria-label="Volver al inicio">
+						&larr;
+					</button>
+				{/if}
+				<span class="app__user">{$sessionStore.usuario.nombre}</span>
+			</div>
 			<button class="app__logout" onclick={handleLogout}>Cerrar sesión</button>
 		</header>
 	{/if}
@@ -53,6 +60,32 @@
 		justify-content: space-between;
 		padding: 0.5rem 0;
 		margin-bottom: 0.5rem;
+	}
+
+	.app__nav {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+
+	.app__back {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 2.5rem;
+		height: 2.5rem;
+		font-size: 1.25rem;
+		font-weight: 700;
+		color: #334155;
+		background-color: #f1f5f9;
+		border: none;
+		border-radius: 0.5rem;
+		cursor: pointer;
+		touch-action: manipulation;
+	}
+
+	.app__back:active {
+		background-color: #e2e8f0;
 	}
 
 	.app__user {
