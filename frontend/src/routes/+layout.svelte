@@ -1,7 +1,8 @@
 <script>
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
-	import { sessionStore } from '$lib/stores/session';
+	import { sessionStore, clearSession } from '$lib/stores/session';
+	import { logout } from '$lib/api/client';
 	import '../app.css';
 
 	let { children } = $props();
@@ -18,9 +19,25 @@
 			goto('/');
 		}
 	});
+
+	async function handleLogout() {
+		try {
+			await logout();
+		} catch {
+			// Ignore errors — we clear the session locally regardless
+		}
+		clearSession();
+		goto('/login');
+	}
 </script>
 
 <div class="app">
+	{#if $sessionStore && $page.url.pathname !== '/login'}
+		<header class="app__header">
+			<span class="app__user">{$sessionStore.usuario.nombre}</span>
+			<button class="app__logout" onclick={handleLogout}>Cerrar sesión</button>
+		</header>
+	{/if}
 	{@render children()}
 </div>
 
@@ -28,5 +45,36 @@
 	.app {
 		min-height: 100vh;
 		padding: env(safe-area-inset-top) 1rem env(safe-area-inset-bottom);
+	}
+
+	.app__header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: 0.5rem 0;
+		margin-bottom: 0.5rem;
+	}
+
+	.app__user {
+		font-size: 0.875rem;
+		font-weight: 600;
+		color: #334155;
+	}
+
+	.app__logout {
+		min-height: 2.5rem;
+		padding: 0.5rem 1rem;
+		font-size: 0.875rem;
+		font-weight: 600;
+		color: #dc2626;
+		background-color: transparent;
+		border: 1px solid #dc2626;
+		border-radius: 0.5rem;
+		cursor: pointer;
+		touch-action: manipulation;
+	}
+
+	.app__logout:active {
+		background-color: #fee2e2;
 	}
 </style>
