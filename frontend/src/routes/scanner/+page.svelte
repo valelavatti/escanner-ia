@@ -3,6 +3,7 @@
 	import { get } from 'svelte/store';
 	import Scanner from '$lib/components/Scanner.svelte';
 	import ProductCard from '$lib/components/ProductCard.svelte';
+	import ProductLocationsCard from '$lib/components/ProductLocationsCard.svelte';
 	import { scannerState, anchoredLocation, type AnchoredLocation } from '$lib/stores/scanner';
 	import { sessionStore } from '$lib/stores/session';
 	import {
@@ -12,10 +13,18 @@
 		lookupSector,
 		getProductoByBarcodeWithStock,
 		getProductoStockTotal,
+		getProductoUbicaciones,
 		createMovimiento,
 		ApiError
 	} from '$lib/api/client';
-	import type { Estante, Deposito, Ubicacion, ProductWithUbicacionStock } from '$lib/api/client';
+	import type {
+		Estante,
+		Deposito,
+		Ubicacion,
+		ProductWithUbicacionStock,
+		ProductoUbicacionItem,
+		ProductoUbicacionesResponse
+	} from '$lib/api/client';
 
 	interface LastScan {
 		text: string;
@@ -54,6 +63,13 @@
 	let selectedEstanteId = $state<number | null>(null);
 	let ubicaciones = $state<Ubicacion[]>([]);
 	let loadingLocations = $state(false);
+
+	// Product-locations fallback (scan product without anchored QR).
+	let locationsProduct = $state<ProductoUbicacionesResponse | null>(null);
+	let locationsList = $state<ProductoUbicacionItem[]>([]);
+	let showLocationsCard = $state(false);
+	let locationsLoading = $state(false);
+	let scannedBarcodePending = $state('');
 
 	function showGreenFlash(message: string) {
 		greenFlash = message;
@@ -112,7 +128,27 @@
 	async function handleProductScan(barcode: string) {
 		const location = get(anchoredLocation);
 		if (!location) {
-			showError('Escaneá un QR de sector primero o elegí una ubicación manual');
+			// No QR anchored: fall back to the product-locations picker instead
+			// of blocking with a red flash. Debounce is already handled by handleScan.
+			scannerRef?.pause();
+			locationsLoading = true;
+			scannedBarcodePending = barcode;
+			showLocationsCard = true;
+			try {
+				const result = await getProductoUbicaciones(barcode);
+				locationsProduct = result;
+				locationsList = result.ubicaciones;
+			} catch (err) {
+				if (err instanceof ApiError && err.status === 404) {
+					showError('Producto no encontrado');
+				} else {
+					showError(`Error al buscar producto: ${barcode}`);
+				}
+				showLocationsCard = false;
+				scannerRef?.resume();
+			} finally {
+				locationsLoading = false;
+			}
 			return;
 		}
 
@@ -204,6 +240,51 @@
 
 	function handleClose() {
 		clearScannedProduct();
+		scannerRef?.resume();
+	}
+
+	async function handleSelectLocation(loc: ProductoUbicacionItem) {
+		// Anchor the chosen location — same shape as selectUbicacion / handleSectorScan.
+		showLocationsCard = false;
+		const anchored: AnchoredLocation = {
+			ubicacion_id: loc.ubicacion_id,
+			estante_nombre: loc.estante_nombre,
+			qr_valor: loc.qr_valor,
+			fila: loc.fila,
+			columna: loc.columna
+		};
+		anchoredLocation.set(anchored);
+
+		// Load the product WITH stock for the newly-anchored location — reuses
+		// the existing getProductoByBarcodeWithStock path so ProductCard + StockInput
+		// render exactly as in the QR-first flow.
+		try {
+			const product = await getProductoByBarcodeWithStock(
+				scannedBarcodePending,
+				loc.ubicacion_id
+			);
+			if (!product) {
+				showError('Producto no encontrado al anclar ubicación');
+				return;
+			}
+			scannedProduct = product;
+			quantity = 0;
+			mode = 'alta';
+			try {
+				const stockInfo = await getProductoStockTotal(product.sku);
+				stockTotal = stockInfo.stock_total;
+			} catch {
+				stockTotal = 0;
+			}
+		} catch (err) {
+			showError(`Error al cargar producto: ${scannedBarcodePending}`);
+		}
+	}
+
+	function handleCancelLocations() {
+		showLocationsCard = false;
+		locationsProduct = null;
+		locationsList = [];
 		scannerRef?.resume();
 	}
 
@@ -389,6 +470,18 @@
 			<span class="location-text">Sin ubicación anclada</span>
 		{/if}
 	</div>
+
+	{#if showLocationsCard}
+		<ProductLocationsCard
+			product={locationsProduct
+				? { sku: locationsProduct.sku, descripcion: locationsProduct.descripcion, stock_total: locationsProduct.stock_total }
+				: { sku: scannedBarcodePending, descripcion: '…', stock_total: 0 }}
+			locations={locationsList}
+			loading={locationsLoading}
+			onSelectLocation={handleSelectLocation}
+			onCancel={handleCancelLocations}
+		/>
+	{/if}
 
 	{#if scannedProduct}
 		<ProductCard

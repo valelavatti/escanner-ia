@@ -32,3 +32,25 @@ class ProductOut(BaseModel):
 class ProductSearchResponse(BaseModel):
     items: list[ProductOut]
     total: int
+
+
+class ProductoUbicacionItem(BaseModel):
+    """One ubicacion where a product has stock."""
+
+    ubicacion_id: int
+    estante_nombre: str
+    qr_valor: str
+    fila: int
+    columna: int
+    stock: int
+    deposito_nombre: str
+
+
+class ProductoUbicacionesResponse(BaseModel):
+    """All ubicaciones where a product has stock, plus the permission-filtered total."""
+
+    sku: str
+    descripcion: str
+    codigo_de_barra: str
+    stock_total: int
+    ubicaciones: list[ProductoUbicacionItem]

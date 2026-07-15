@@ -279,6 +279,24 @@ export interface ProductoStockTotal {
 	stock_total: number;
 }
 
+export interface ProductoUbicacionItem {
+	ubicacion_id: number;
+	estante_nombre: string;
+	qr_valor: string;
+	fila: number;
+	columna: number;
+	stock: number;
+	deposito_nombre: string;
+}
+
+export interface ProductoUbicacionesResponse {
+	sku: string;
+	descripcion: string;
+	codigo_de_barra: string;
+	stock_total: number;
+	ubicaciones: ProductoUbicacionItem[];
+}
+
 export interface MovimientoCreate {
 	producto_sku: string;
 	ubicacion_id: number;
@@ -411,6 +429,14 @@ export async function getProductoByBarcodeWithStock(
 export async function getProductoStockTotal(sku: string): Promise<ProductoStockTotal> {
 	return api<ProductoStockTotal>(
 		`/productos/${encodeURIComponent(sku)}/stock-total?sku=${encodeURIComponent(sku)}`
+	);
+}
+
+export async function getProductoUbicaciones(
+	codigo: string
+): Promise<ProductoUbicacionesResponse> {
+	return api<ProductoUbicacionesResponse>(
+		`/productos/${encodeURIComponent(codigo)}/ubicaciones`
 	);
 }
 

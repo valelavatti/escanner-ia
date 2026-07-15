@@ -3,11 +3,17 @@
 import aiosqlite
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.api.v1.deps import get_current_user
+from app.api.v1.deps import get_current_user, get_deposito_ids_for_user
 from app.core.database import get_db
 from app.repositories import movimiento_repository, producto_repository
 from app.schemas.auth import UsuarioResponse
-from app.schemas.productos import ProductOut, ProductSearchResponse, UbicacionStockInfo
+from app.schemas.productos import (
+    ProductOut,
+    ProductSearchResponse,
+    ProductoUbicacionesResponse,
+    ProductoUbicacionItem,
+    UbicacionStockInfo,
+)
 
 router = APIRouter()
 
@@ -63,6 +69,51 @@ async def get_producto_stock_total(
         )
     total = await movimiento_repository.get_producto_stock_total(db, row["sku"])
     return {"sku": row["sku"], "stock_total": total}
+
+
+@router.get("/{codigo_de_barra}/ubicaciones", response_model=ProductoUbicacionesResponse)
+async def get_producto_ubicaciones(
+    codigo_de_barra: str,
+    db: aiosqlite.Connection = Depends(get_db),
+    user: UsuarioResponse = Depends(get_current_user),
+):
+    """Return every ubicacion where the product has stock, filtered by deposito permissions.
+
+    Regular shelves report ``stock`` from ``ubicaciones.stock_actual``; Suelto
+    reports the SUM of ``movimientos.cantidad``. ``stock_total`` is the sum of
+    the returned per-ubicacion stocks (matches the permission-filtered view).
+    """
+    row = await producto_repository.get_producto_by_codigo(db, codigo_de_barra)
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Producto no encontrado",
+        )
+
+    deposito_ids = await get_deposito_ids_for_user(db, user)
+    ubicaciones = await movimiento_repository.get_producto_ubicaciones(
+        db, row["sku"], deposito_ids
+    )
+
+    stock_total = sum(int(u["stock"]) for u in ubicaciones)
+    return ProductoUbicacionesResponse(
+        sku=row["sku"],
+        descripcion=row["descripcion"],
+        codigo_de_barra=row["codigo_de_barra"],
+        stock_total=stock_total,
+        ubicaciones=[
+            ProductoUbicacionItem(
+                ubicacion_id=u["ubicacion_id"],
+                estante_nombre=u["estante_nombre"],
+                qr_valor=u["qr_valor"],
+                fila=u["fila"],
+                columna=u["columna"],
+                stock=int(u["stock"]),
+                deposito_nombre=u["deposito_nombre"],
+            )
+            for u in ubicaciones
+        ],
+    )
 
 
 @router.get("/{codigo_de_barra}", response_model=ProductOut)

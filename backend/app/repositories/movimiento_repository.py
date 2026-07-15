@@ -434,6 +434,100 @@ async def get_producto_stock_total(db: aiosqlite.Connection, producto_sku: str) 
     return regular_stock + suelto_stock
 
 
+async def get_producto_ubicaciones(
+    db: aiosqlite.Connection,
+    producto_sku: str,
+    deposito_ids: Optional[list[int]] = None,
+) -> list[dict]:
+    """Return every ubicacion where ``producto_sku`` has stock, permission-filtered.
+
+    Combines two sources into a single list:
+      1. Regular shelves: ``ubicaciones.producto_id = sku`` with ``stock = stock_actual``.
+      2. Suelto: SUM of ``movimientos.cantidad`` for the product across Suelto
+         ubicaciones (one Suelto row per deposito's Suelto estante with non-zero stock).
+
+    Permission filtering mirrors ``list_movimientos``:
+      - ``deposito_ids is None``  (admin): no filter, all depositos returned.
+      - ``deposito_ids is []``    (non-admin, no access): returns ``[]`` immediately.
+      - ``deposito_ids is [a,b]`` (non-admin, restricted): ``WHERE d.id IN (a, b)``.
+
+    The caller (endpoint) computes ``stock_total`` as the sum of per-row ``stock``
+    so the total matches the permission-filtered view, not the global stock.
+    """
+    # Empty permission list → no results (matches list_movimientos contract).
+    if deposito_ids is not None and not deposito_ids:
+        return []
+
+    # 1. Regular shelves — stock comes from ubicaciones.stock_actual.
+    regular_sql = """
+        SELECT
+            u.id AS ubicacion_id,
+            e.nombre AS estante_nombre,
+            u.qr_valor,
+            u.fila,
+            u.columna,
+            u.stock_actual AS stock,
+            d.id AS deposito_id,
+            d.nombre AS deposito_nombre,
+            'regular' AS source
+        FROM ubicaciones u
+        JOIN estantes e ON e.id = u.estante_id
+        JOIN depositos d ON d.id = e.deposito_id
+        WHERE u.producto_id = ?
+          AND u.estado = 'activo'
+          AND e.deleted_at IS NULL
+    """
+    regular_params: list = [producto_sku]
+    if deposito_ids is not None:
+        placeholders = ",".join("?" for _ in deposito_ids)
+        regular_sql += f" AND d.id IN ({placeholders})"
+        regular_params.extend(deposito_ids)
+
+    regular_rows: list[dict] = []
+    async with db.execute(regular_sql, tuple(regular_params)) as cursor:
+        rows = await cursor.fetchall()
+        regular_rows = [dict(row) for row in rows]
+
+    # 2. Suelto — stock is the SUM of movimientos.cantidad for that product.
+    # One row per Suelto estante (typically one per deposito) with non-zero stock.
+    suelto_sql = """
+        SELECT
+            u.id AS ubicacion_id,
+            e.nombre AS estante_nombre,
+            u.qr_valor,
+            u.fila,
+            u.columna,
+            COALESCE(SUM(m.cantidad), 0) AS stock,
+            d.id AS deposito_id,
+            d.nombre AS deposito_nombre,
+            'suelto' AS source
+        FROM estantes e
+        JOIN depositos d ON d.id = e.deposito_id
+        JOIN ubicaciones u ON u.estante_id = e.id
+        LEFT JOIN movimientos m ON m.ubicacion_id = u.id AND m.producto_id = ?
+        WHERE e.nombre = 'Suelto'
+          AND e.deleted_at IS NULL
+          AND u.estado = 'activo'
+    """
+    suelto_params: list = [producto_sku]
+    if deposito_ids is not None:
+        placeholders = ",".join("?" for _ in deposito_ids)
+        suelto_sql += f" AND d.id IN ({placeholders})"
+        suelto_params.extend(deposito_ids)
+
+    suelto_sql += (
+        " GROUP BY u.id, e.nombre, u.qr_valor, u.fila, u.columna, d.id, d.nombre"
+        " HAVING stock != 0"
+    )
+
+    suelto_rows: list[dict] = []
+    async with db.execute(suelto_sql, tuple(suelto_params)) as cursor:
+        rows = await cursor.fetchall()
+        suelto_rows = [dict(row) for row in rows]
+
+    return regular_rows + suelto_rows
+
+
 async def list_movimientos(
     db: aiosqlite.Connection,
     filters: dict,
