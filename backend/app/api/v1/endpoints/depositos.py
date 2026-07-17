@@ -134,9 +134,10 @@ async def delete_deposito(
 ):
     """Delete a deposito. Requires admin.
 
-    Rejects deletion with 400 when the deposito has estantes assigned (the
-    ``estantes.deposito_id`` FK has no ON DELETE clause, so SQLite would
-    reject it anyway) or when it is the last remaining deposito.
+    Rejects deletion with 400 when the deposito has estantes assigned —
+    including soft-deleted ones, since the ``estantes.deposito_id`` FK has no
+    ON DELETE clause and SQLite blocks the DELETE regardless of soft-delete
+    status — or when it is the last remaining deposito.
     ``usuario_deposito`` assignments are removed by ON DELETE CASCADE.
     """
     deposito = await deposito_repository.get_deposito_by_id(db, deposito_id)
@@ -152,7 +153,7 @@ async def delete_deposito(
     if estantes_count > 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No se puede eliminar un depósito con estantes asignados",
+            detail="No se puede eliminar: tiene estantes asignados (incluyendo dados de baja)",
         )
 
     if await deposito_repository.count_depositos(db) <= 1:

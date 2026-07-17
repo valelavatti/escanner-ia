@@ -121,9 +121,15 @@ async def delete_deposito(db: aiosqlite.Connection, deposito_id: int) -> bool:
 async def count_estantes_for_deposito(
     db: aiosqlite.Connection, deposito_id: int
 ) -> int:
-    """Return the number of non-deleted estantes assigned to a deposito."""
+    """Return the number of estantes assigned to a deposito (including soft-deleted).
+
+    The ``estantes.deposito_id`` FK has no ON DELETE clause, so SQLite blocks
+    deletion when ANY estante — active or soft-deleted — still references the
+    deposito.  We count all of them so the guard returns a clear 400 instead of
+    letting the DELETE hit a 500 FK constraint error.
+    """
     async with db.execute(
-        "SELECT COUNT(*) FROM estantes WHERE deposito_id = ? AND deleted_at IS NULL",
+        "SELECT COUNT(*) FROM estantes WHERE deposito_id = ?",
         (deposito_id,),
     ) as cursor:
         row = await cursor.fetchone()

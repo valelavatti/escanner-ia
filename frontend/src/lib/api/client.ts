@@ -317,8 +317,8 @@ export interface MovimientoCreate {
 
 export interface MovimientoResponse {
 	id: number;
-	usuario_id: number;
-	usuario_nombre: string;
+	usuario_id: number | null;
+	usuario_nombre: string | null;
 	producto_sku: string;
 	producto_descripcion: string;
 	ubicacion_id: number;

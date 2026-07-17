@@ -23,8 +23,8 @@ class MovimientoResponse(BaseModel):
     """Full movement record returned by the API."""
 
     id: int
-    usuario_id: int
-    usuario_nombre: str
+    usuario_id: Optional[int] = None
+    usuario_nombre: Optional[str] = None
     producto_sku: Optional[str] = None
     producto_descripcion: Optional[str] = None
     ubicacion_id: int

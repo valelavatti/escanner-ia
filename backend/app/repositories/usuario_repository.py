@@ -113,7 +113,17 @@ async def update_usuario(
 
 
 async def delete_usuario(db: aiosqlite.Connection, usuario_id: int) -> bool:
-    """Hard-delete a user. usuario_deposito rows are removed by CASCADE."""
+    """Hard-delete a user.
+
+    Anonymizes the audit trail first: the user's movimientos keep all their
+    data but ``usuario_id`` is set to NULL so the FK does not block deletion.
+    ``usuario_deposito`` and ``sessions`` rows are removed by ON DELETE CASCADE.
+    Both the UPDATE and DELETE run in a single transaction.
+    """
+    await db.execute(
+        "UPDATE movimientos SET usuario_id = NULL WHERE usuario_id = ?",
+        (usuario_id,),
+    )
     cursor = await db.execute("DELETE FROM usuarios WHERE id = ?", (usuario_id,))
     await db.commit()
     return cursor.rowcount > 0

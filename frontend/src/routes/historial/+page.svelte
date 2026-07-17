@@ -375,7 +375,7 @@
 						</div>
 
 						<div class="movimiento-card__footer">
-							<span>{movimiento.usuario_nombre}</span>
+							<span>{movimiento.usuario_nombre ?? '—'}</span>
 						</div>
 					</li>
 				{/each}

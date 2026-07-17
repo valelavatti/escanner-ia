@@ -327,7 +327,7 @@ async def get_movimiento_by_id(db: aiosqlite.Connection, movimiento_id: int) -> 
             m.timestamp,
             m.tipo
         FROM movimientos m
-        JOIN usuarios u ON u.id = m.usuario_id
+        LEFT JOIN usuarios u ON u.id = m.usuario_id
         LEFT JOIN productos p ON p.sku = m.producto_id
         JOIN ubicaciones ubi ON ubi.id = m.ubicacion_id
         JOIN estantes e ON e.id = ubi.estante_id
@@ -610,7 +610,7 @@ async def list_movimientos(
             m.timestamp,
             m.tipo
         FROM movimientos m
-        JOIN usuarios u ON u.id = m.usuario_id
+        LEFT JOIN usuarios u ON u.id = m.usuario_id
         LEFT JOIN productos p ON p.sku = m.producto_id
         JOIN ubicaciones ubi ON ubi.id = m.ubicacion_id
         JOIN estantes e ON e.id = ubi.estante_id
@@ -695,7 +695,7 @@ async def export_movimientos_csv(
             m.timestamp AS fecha_hora,
             m.tipo
         FROM movimientos m
-        JOIN usuarios u ON u.id = m.usuario_id
+        LEFT JOIN usuarios u ON u.id = m.usuario_id
         LEFT JOIN productos p ON p.sku = m.producto_id
         JOIN ubicaciones ubi ON ubi.id = m.ubicacion_id
         JOIN estantes e ON e.id = ubi.estante_id
