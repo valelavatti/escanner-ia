@@ -294,18 +294,30 @@
 	.scanner__reader {
 		width: 100%;
 		height: 100%;
+		position: relative;
 	}
 
-	.scanner__reader :global(video),
-	.scanner__reader :global(canvas),
 	.scanner__reader :global(div[id^="qr-"]) {
 		width: 100% !important;
-		max-width: 100% !important;
+		height: 100% !important;
 	}
 
 	.scanner__reader :global(video) {
+		position: absolute !important;
+		top: 0 !important;
+		left: 0 !important;
+		width: 100% !important;
 		height: 100% !important;
+		max-width: 100% !important;
 		object-fit: cover;
+	}
+
+	.scanner__reader :global(canvas) {
+		position: absolute !important;
+		top: 0 !important;
+		left: 0 !important;
+		width: 100% !important;
+		height: 100% !important;
 	}
 
 	.scanner__camera-controls {
