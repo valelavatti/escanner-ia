@@ -284,11 +284,10 @@
 	.scanner__reader-wrapper {
 		position: relative;
 		flex: 1 1 auto;
-		min-height: 0;
+		min-height: 60vh;
 		width: 100%;
-		aspect-ratio: 1 / 1;
 		background-color: #0f172a;
-		border-radius: 0.75rem;
+		border-radius: 0;
 		overflow: hidden;
 	}
 
