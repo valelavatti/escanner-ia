@@ -35,7 +35,12 @@
 	let searchSearching = $state(false);
 	let searchSelecting = $state(false);
 
-	let expandedEstante = $state<EstanteWithUbicaciones | null>(null);
+	let expandedEstanteId = $state<number | null>(null);
+	const expandedEstante = $derived(
+		expandedEstanteId !== null
+			? (estantes.find((e) => e.id === expandedEstanteId) ?? null)
+			: null
+	);
 
 	const selectedCellId = $derived($mapStore.selectedCellId);
 	const selectedUbicacion = $derived(
@@ -291,7 +296,7 @@
 			{estantes}
 			selectedCellId={selectedCellId ?? null}
 			onCellClick={handleCellClick}
-			onExpand={(e) => (expandedEstante = e)}
+			onExpand={(e) => (expandedEstanteId = e.id)}
 		/>
 	{/if}
 </div>
@@ -323,7 +328,12 @@
 />
 
 {#if expandedEstante}
-	<ShelfDetailModal estante={expandedEstante} onClose={() => (expandedEstante = null)} />
+	<ShelfDetailModal
+		estante={expandedEstante}
+		selectedCellId={selectedCellId ?? null}
+		onCellClick={handleCellClick}
+		onClose={() => (expandedEstanteId = null)}
+	/>
 {/if}
 
 <style>

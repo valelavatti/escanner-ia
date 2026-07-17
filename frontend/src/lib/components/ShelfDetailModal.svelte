@@ -5,10 +5,12 @@
 
 	interface Props {
 		estante: Estante & { ubicaciones: Ubicacion[] };
+		selectedCellId?: number | null;
+		onCellClick?: (ubicacion: Ubicacion) => void;
 		onClose: () => void;
 	}
 
-	let { estante, onClose }: Props = $props();
+	let { estante, selectedCellId = null, onCellClick, onClose }: Props = $props();
 	let visible = $state(false);
 
 	$effect(() => {
@@ -62,14 +64,15 @@
 				style="--cols: {estante.columnas}; --rows: {estante.filas};"
 			>
 				{#each estante.ubicaciones as ubicacion (ubicacion.id)}
-					<LocationCell {ubicacion} interactive={false} />
+					<LocationCell
+						{ubicacion}
+						isSelected={ubicacion.id === selectedCellId}
+						onClick={onCellClick}
+					/>
 				{/each}
 			</div>
 		</div>
 
-		<footer class="modal__footer">
-			<p class="modal__note">Cerrá para interactuar con las ubicaciones</p>
-		</footer>
 	</div>
 </div>
 
@@ -77,7 +80,7 @@
 	.modal-backdrop {
 		position: fixed;
 		inset: 0;
-		z-index: 100;
+		z-index: 40;
 		display: flex;
 		align-items: flex-end;
 		justify-content: center;
@@ -198,20 +201,6 @@
 		gap: 0.5rem;
 		width: 100%;
 		min-width: 0;
-	}
-
-	.modal__footer {
-		flex-shrink: 0;
-		padding: 0.75rem 1rem;
-		padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
-		border-top: 1px solid #e2e8f0;
-		text-align: center;
-	}
-
-	.modal__note {
-		margin: 0;
-		font-size: 0.875rem;
-		color: #64748b;
 	}
 
 	@media (min-width: 768px) {
