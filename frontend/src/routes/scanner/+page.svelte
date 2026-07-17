@@ -103,6 +103,61 @@
 		}
 	}
 
+	async function finalizeLocationSelection(anchored: AnchoredLocation, barcode: string) {
+		// Shared by handleSelectLocation (tap a location) and handleSectorScan
+		// (QR scanned while the locations card is visible): anchor the location,
+		// pause the camera to enter stock-entry mode, and load the already-scanned
+		// product for that location so ProductCard + StockInput render exactly as
+		// in the QR-first flow.
+		showLocationsCard = false;
+		anchoredLocation.set(anchored);
+		scannerRef?.pause();
+
+		try {
+			const product = await getProductoByBarcodeWithStock(barcode, anchored.ubicacion_id);
+			if (!product) {
+				showError('Producto no encontrado al anclar ubicación');
+				return;
+			}
+			scannedProduct = product;
+			quantity = 0;
+			mode = 'alta';
+			try {
+				const stockInfo = await getProductoStockTotal(product.sku);
+				stockTotal = stockInfo.stock_total;
+			} catch {
+				stockTotal = 0;
+			}
+		} catch (err) {
+			showError(`Error al cargar producto: ${barcode}`);
+		}
+	}
+
+	async function loadProductLocations(barcode: string): Promise<boolean> {
+		// Fetch locations for the given barcode and update the locations card
+		// state. Used when the card first opens (no anchored location) and when a
+		// different product is scanned while the card is already visible. Returns
+		// true on success, false on error so the caller decides the UX.
+		locationsLoading = true;
+		locationsProduct = null;
+		locationsList = [];
+		try {
+			const result = await getProductoUbicaciones(barcode);
+			locationsProduct = result;
+			locationsList = result.ubicaciones;
+			return true;
+		} catch (err) {
+			if (err instanceof ApiError && err.status === 404) {
+				showError('Producto no encontrado');
+			} else {
+				showError(`Error al buscar producto: ${barcode}`);
+			}
+			return false;
+		} finally {
+			locationsLoading = false;
+		}
+	}
+
 	async function handleSectorScan(qrValor: string) {
 		try {
 			const ubicacion = await lookupSector(qrValor);
@@ -113,6 +168,15 @@
 				fila: ubicacion.fila,
 				columna: ubicacion.columna
 			};
+
+			if (showLocationsCard) {
+				// QR scanned while the product-locations card is visible: the user
+				// is picking a location for the already-scanned product. Anchor it,
+				// pause the camera, and load the product for stock entry.
+				await finalizeLocationSelection(anchored, scannedBarcodePending);
+				return;
+			}
+
 			anchoredLocation.set(anchored);
 			clearScannedProduct();
 			showGreenFlash(`Ubicación anclada: ${ubicacion.estante_nombre} ${ubicacion.qr_valor}`);
@@ -127,27 +191,30 @@
 
 	async function handleProductScan(barcode: string) {
 		const location = get(anchoredLocation);
+
+		// While the product-locations card is visible the camera stays active so
+		// the user can scan a QR sector to pick a location. Re-scans of the same
+		// product are ignored (the debounce in handleScan also covers this); a
+		// different product refreshes the card in place without closing it.
+		if (showLocationsCard) {
+			if (barcode === scannedBarcodePending) {
+				return;
+			}
+			scannedBarcodePending = barcode;
+			await loadProductLocations(barcode);
+			return;
+		}
+
 		if (!location) {
 			// No QR anchored: fall back to the product-locations picker instead
-			// of blocking with a red flash. Debounce is already handled by handleScan.
-			scannerRef?.pause();
-			locationsLoading = true;
+			// of blocking with a red flash. The camera stays active so the user
+			// can scan a QR sector to pick a location while the card is visible.
 			scannedBarcodePending = barcode;
 			showLocationsCard = true;
-			try {
-				const result = await getProductoUbicaciones(barcode);
-				locationsProduct = result;
-				locationsList = result.ubicaciones;
-			} catch (err) {
-				if (err instanceof ApiError && err.status === 404) {
-					showError('Producto no encontrado');
-				} else {
-					showError(`Error al buscar producto: ${barcode}`);
-				}
+			const ok = await loadProductLocations(barcode);
+			if (!ok) {
 				showLocationsCard = false;
 				scannerRef?.resume();
-			} finally {
-				locationsLoading = false;
 			}
 			return;
 		}
@@ -245,7 +312,6 @@
 
 	async function handleSelectLocation(loc: ProductoUbicacionItem) {
 		// Anchor the chosen location — same shape as selectUbicacion / handleSectorScan.
-		showLocationsCard = false;
 		const anchored: AnchoredLocation = {
 			ubicacion_id: loc.ubicacion_id,
 			estante_nombre: loc.estante_nombre,
@@ -253,32 +319,11 @@
 			fila: loc.fila,
 			columna: loc.columna
 		};
-		anchoredLocation.set(anchored);
-
-		// Load the product WITH stock for the newly-anchored location — reuses
-		// the existing getProductoByBarcodeWithStock path so ProductCard + StockInput
-		// render exactly as in the QR-first flow.
-		try {
-			const product = await getProductoByBarcodeWithStock(
-				scannedBarcodePending,
-				loc.ubicacion_id
-			);
-			if (!product) {
-				showError('Producto no encontrado al anclar ubicación');
-				return;
-			}
-			scannedProduct = product;
-			quantity = 0;
-			mode = 'alta';
-			try {
-				const stockInfo = await getProductoStockTotal(product.sku);
-				stockTotal = stockInfo.stock_total;
-			} catch {
-				stockTotal = 0;
-			}
-		} catch (err) {
-			showError(`Error al cargar producto: ${scannedBarcodePending}`);
-		}
+		// Pause the camera (entering stock-entry mode) and load the product WITH
+		// stock for the newly-anchored location — reuses the existing
+		// getProductoByBarcodeWithStock path so ProductCard + StockInput render
+		// exactly as in the QR-first flow.
+		await finalizeLocationSelection(anchored, scannedBarcodePending);
 	}
 
 	function handleCancelLocations() {
