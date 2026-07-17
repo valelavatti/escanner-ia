@@ -113,8 +113,8 @@
 					cameraConfig,
 					{
 						fps: 10,
-						qrbox: { width: 280, height: 280 },
-						aspectRatio: 1,
+						qrbox: { width: 250, height: 250 },
+						aspectRatio: 1.333333,
 						disableFlip: false
 					},
 					(decodedText: string, result: unknown) => {
@@ -296,15 +296,9 @@
 		height: 100%;
 	}
 
-	.scanner__reader :global(video),
-	.scanner__reader :global(canvas),
-	.scanner__reader :global(div[id^="qr-"]) {
-		width: 100% !important;
-		max-width: 100% !important;
-	}
-
 	.scanner__reader :global(video) {
-		height: 100% !important;
+		width: 100%;
+		height: 100%;
 		object-fit: cover;
 	}
 
