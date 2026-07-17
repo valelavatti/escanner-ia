@@ -119,7 +119,7 @@
 		closeBtn.textContent = '✕ Cerrar';
 		closeBtn.setAttribute('aria-label', 'Cerrar vista previa');
 		closeBtn.style.cssText =
-			'position:fixed;top:10px;right:10px;z-index:10000;padding:10px 16px;font-size:16px;font-weight:600;background:#dc2626;color:#fff;border:none;border-radius:8px;cursor:pointer;touch-action:manipulation;';
+			'position:fixed;bottom:10px;left:10px;z-index:10000;padding:10px 16px;font-size:16px;font-weight:600;background:#dc2626;color:#fff;border:none;border-radius:8px;cursor:pointer;touch-action:manipulation;';
 
 		function cleanup() {
 			if (container.parentNode) container.parentNode.removeChild(container);
