@@ -296,9 +296,15 @@
 		height: 100%;
 	}
 
+	.scanner__reader :global(video),
+	.scanner__reader :global(canvas),
+	.scanner__reader :global(div[id^="qr-"]) {
+		width: 100% !important;
+		max-width: 100% !important;
+	}
+
 	.scanner__reader :global(video) {
-		width: 100%;
-		height: 100%;
+		height: 100% !important;
 		object-fit: cover;
 	}
 
