@@ -11,15 +11,6 @@ import aiosqlite
 from app.repositories import ubicacion_repository
 
 
-async def list_depositos(db: aiosqlite.Connection) -> list[dict]:
-    """Return all depositos ordered by name."""
-    async with db.execute(
-        "SELECT id, nombre FROM depositos ORDER BY nombre"
-    ) as cursor:
-        rows = await cursor.fetchall()
-        return [dict(row) for row in rows]
-
-
 async def list_estantes(
     db: aiosqlite.Connection,
     include_deleted: bool = False,

@@ -201,6 +201,17 @@ export async function importExcel(file: File, strategy: string = 'error'): Promi
 export interface Deposito {
 	id: number;
 	nombre: string;
+	created_at?: string;
+	estantes_count?: number;
+	usuarios_count?: number;
+}
+
+export interface DepositoCreate {
+	nombre: string;
+}
+
+export interface DepositoUpdate {
+	nombre: string;
 }
 
 export interface Estante {
@@ -331,6 +342,24 @@ export interface MovimientoListResponse {
 
 export async function listDepositos(): Promise<Deposito[]> {
 	return api<Deposito[]>('/depositos');
+}
+
+export async function createDeposito(data: DepositoCreate): Promise<Deposito> {
+	return api<Deposito>('/depositos', {
+		method: 'POST',
+		body: JSON.stringify(data)
+	});
+}
+
+export async function updateDeposito(id: number, data: DepositoUpdate): Promise<Deposito> {
+	return api<Deposito>(`/depositos/${id}`, {
+		method: 'PUT',
+		body: JSON.stringify(data)
+	});
+}
+
+export async function deleteDeposito(id: number): Promise<{ ok: boolean }> {
+	return api<{ ok: boolean }>(`/depositos/${id}`, { method: 'DELETE' });
 }
 
 export async function listEstantes(

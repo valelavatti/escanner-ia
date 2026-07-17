@@ -8,6 +8,7 @@
 	const tabs = [
 		{ path: '/admin/import', label: 'Importar' },
 		{ path: '/admin/estantes', label: 'Estantes' },
+		{ path: '/admin/depositos', label: 'Depósitos' },
 		{ path: '/admin/usuarios', label: 'Usuarios' }
 	];
 

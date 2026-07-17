@@ -21,7 +21,6 @@ from app.repositories import estante_repository, ubicacion_repository
 from app.schemas.auth import UsuarioResponse
 from app.schemas.estante import (
     ConfirmDeleteOutOfBoundsRequest,
-    DepositoResponse,
     EstanteCreate,
     EstanteDetailResponse,
     EstanteResponse,
@@ -32,7 +31,6 @@ from app.schemas.estante import (
 from app.services import qr as qr_service
 
 router = APIRouter()
-depositos_router = APIRouter()
 
 
 def _estante_response(row: dict) -> EstanteResponse:
@@ -121,23 +119,6 @@ async def list_estantes(
         deposito_ids=deposito_ids,
     )
     return [_estante_response(row) for row in rows]
-
-
-@depositos_router.get("", response_model=list[DepositoResponse])
-async def list_depositos(
-    db: aiosqlite.Connection = Depends(get_db),
-    user: UsuarioResponse = Depends(get_current_user),
-):
-    """List all depositos (warehouses) ordered by name.
-
-    Non-admins only see depositos assigned to them.
-    """
-    deposito_ids = await get_deposito_ids_for_user(db, user)
-    rows = await estante_repository.list_depositos(db)
-    if deposito_ids is not None:
-        accessible = set(deposito_ids)
-        rows = [row for row in rows if row["id"] in accessible]
-    return [DepositoResponse(id=row["id"], nombre=row["nombre"]) for row in rows]
 
 
 @router.get("/{estante_id}", response_model=EstanteDetailResponse)
