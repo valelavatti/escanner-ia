@@ -5,9 +5,10 @@
 		ubicacion: Ubicacion;
 		isSelected?: boolean;
 		onClick?: (ubicacion: Ubicacion) => void;
+		interactive?: boolean;
 	}
 
-	let { ubicacion, isSelected = false, onClick }: Props = $props();
+	let { ubicacion, isSelected = false, onClick, interactive = true }: Props = $props();
 
 	const LOW_STOCK_THRESHOLD = 10;
 
@@ -22,12 +23,27 @@
 	);
 	const isEmpty = $derived(!ubicacion.producto_id && !ubicacion.producto_sku);
 
+	const cellAriaLabel = $derived(
+		`Ubicación ${ubicacion.qr_valor}${ubicacion.producto_sku ? `, ${ubicacion.producto_sku}, stock ${ubicacion.stock_actual}` : ', vacía'}`
+	);
+
 	function handleKeyDown(event: KeyboardEvent) {
 		if (event.key === 'Enter' || event.key === ' ') {
 			event.preventDefault();
 			onClick?.(ubicacion);
 		}
 	}
+
+	const interactiveAttrs = $derived(
+		interactive
+			? {
+					onclick: () => onClick?.(ubicacion),
+					onkeydown: handleKeyDown,
+					role: 'button' as const,
+					tabindex: 0
+				}
+			: {}
+	);
 </script>
 
 <div
@@ -37,11 +53,9 @@
 	class:cell--low-stock={isLowStock}
 	class:cell--suelto={isSuelto}
 	class:cell--selected={isSelected}
-	onclick={() => onClick?.(ubicacion)}
-	onkeydown={handleKeyDown}
-	role="button"
-	tabindex="0"
-	aria-label={`Ubicación ${ubicacion.qr_valor}${ubicacion.producto_sku ? `, ${ubicacion.producto_sku}, stock ${ubicacion.stock_actual}` : ', vacía'}`}
+	class:cell--static={!interactive}
+	{...interactiveAttrs}
+	aria-label={cellAriaLabel}
 	title={ubicacion.qr_valor}
 >
 	<span class="cell__coords">{ubicacion.fila}-{ubicacion.columna}</span>
@@ -106,6 +120,10 @@
 		border: 3px solid #2563eb;
 		transform: scale(1.05);
 		box-shadow: 0 4px 12px rgba(37, 99, 235, 0.35);
+	}
+
+	.cell--static {
+		cursor: default;
 	}
 
 	.cell__coords,

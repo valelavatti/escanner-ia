@@ -3,6 +3,7 @@
 	import WarehouseMap from '$lib/components/WarehouseMap.svelte';
 	import MapDetailPanel from '$lib/components/MapDetailPanel.svelte';
 	import ProductSearchModal from '$lib/components/ProductSearchModal.svelte';
+	import ShelfDetailModal from '$lib/components/ShelfDetailModal.svelte';
 	import {
 		listDepositos,
 		listEstantes,
@@ -33,6 +34,8 @@
 	let searchResults = $state<ProductSearchResult[]>([]);
 	let searchSearching = $state(false);
 	let searchSelecting = $state(false);
+
+	let expandedEstante = $state<EstanteWithUbicaciones | null>(null);
 
 	const selectedCellId = $derived($mapStore.selectedCellId);
 	const selectedUbicacion = $derived(
@@ -288,6 +291,7 @@
 			{estantes}
 			selectedCellId={selectedCellId ?? null}
 			onCellClick={handleCellClick}
+			onExpand={(e) => (expandedEstante = e)}
 		/>
 	{/if}
 </div>
@@ -317,6 +321,10 @@
 	onsearch={handleSearch}
 	onselect={handleSelectProduct}
 />
+
+{#if expandedEstante}
+	<ShelfDetailModal estante={expandedEstante} onClose={() => (expandedEstante = null)} />
+{/if}
 
 <style>
 	.map-page {
