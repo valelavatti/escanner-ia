@@ -1,0 +1,80 @@
+# docker-compose.yml — Local stack mirror of the Coolify deployment.
+#
+# Coolify reads this file or (more commonly) lets you point each service at
+# a Dockerfile + repo subdirectory. Either way, the contracts below are the
+# production source of truth for env vars, ports, volumes, and service
+# dependencies.
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: escanner-backend:latest
+    container_name: escanner-backend
+    restart: unless-stopped
+
+    # Bind persistent data so the SQLite DB and QR cache survive container
+    # restarts. In Coolify, map these to named volumes instead.
+    volumes:
+      - backend-data:/app/data
+      - backend-qr:/app/qr_cache
+
+    environment:
+      # ── Application config (mirrors backend/.env) ─────────────
+      DB_PATH: /app/data/app.db
+      QR_CACHE_DIR: /app/qr_cache/
+      QR_DEFAULT_SIZE: "200"
+      # CHANGE THIS in production! Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"
+      SESSION_SECRET: "changeme-please-replace"
+      # Comma-separated list of allowed origins. Include the public Coolify
+      # domain where the frontend will be served.
+      CORS_ORIGINS: "https://your-coolify-domain.example.com"
+
+    # Internal port only — the frontend (nginx) proxies to it.
+    expose:
+      - "8001"
+    # Uncomment to expose the API directly (e.g. for testing with curl).
+    # ports:
+    #   - "8001:8001"
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/api/v1/health', timeout=3).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+    # Optional: restart with a slight delay so the DB volume is ready.
+    # (compose v2.20+)
+    # depends_on:
+    #   backend-data:
+    #     condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: escanner-frontend:latest
+    container_name: escanner-frontend
+    restart: unless-stopped
+
+    ports:
+      - "80:80"
+
+    # The frontend talks to the backend over the internal Docker network.
+    # (The `backend` hostname is the service name above — Docker DNS resolves it.)
+    depends_on:
+      backend:
+        condition: service_healthy
+
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  backend-data:
+  backend-qr:

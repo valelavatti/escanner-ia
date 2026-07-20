@@ -1,0 +1,36 @@
+# ── Git / repo metadata (not needed in builds) ──────────────────
+.git/
+.gitignore
+.gitattributes
+
+# ── Local data / runtime artefacts (bind-mounted in production) ─
+app.db
+app.db-wal
+app.db-shm
+
+# ── QR cache (regenerated at runtime, bind-mount in prod) ───────
+qr_cache/
+
+# ── Local user / sample data (NEVER ship to prod) ───────────────
+Productos Sotano.xlsx
+*.xlsx
+qrs/
+
+# ── Dev / IDE files ────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# ── Env files (injected at runtime, not baked) ─────────────────
+.env
+.env.local
+.env.*.local
+
+# ── Documentation / spec (not needed in runtime image) ──────────
+openspec/
+sdd/
+.agents/
+.atl/
+skills-lock.json
+README.md
