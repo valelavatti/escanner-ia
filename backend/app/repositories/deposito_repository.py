@@ -1,8 +1,11 @@
 """Deposito (warehouse) data access layer.
 
 Depositos are hard-deleted. Deletion is guarded upstream: a deposito cannot be
-removed while it has estantes assigned, and at least one deposito must remain.
-`usuario_deposito` assignments cascade on delete (see migration 010).
+removed while it has ACTIVE estantes assigned, and at least one deposito must
+remain. Soft-deleted estantes WITHOUT movimientos can be force-deleted along
+with the deposito by passing ``cascade=True`` to ``delete_deposito``; those
+WITH movimientos always block (audit trail must be preserved).
+``usuario_deposito`` assignments cascade on delete (see migration 010).
 """
 
 from typing import Optional
@@ -107,15 +110,205 @@ async def update_deposito(
     return await get_deposito_by_id(db, deposito_id)
 
 
-async def delete_deposito(db: aiosqlite.Connection, deposito_id: int) -> bool:
-    """Hard-delete a deposito. ``usuario_deposito`` rows cascade on delete.
+async def delete_deposito(
+    db: aiosqlite.Connection,
+    deposito_id: int,
+    cascade: bool = False,
+) -> dict:
+    """Hard-delete a deposito, optionally cascading soft-deleted estantes.
 
-    Callers MUST guard: reject when the deposito has estantes (FK RESTRICT) or
-    when it is the last remaining deposito.
+    ``usuario_deposito`` rows cascade on delete (migration 010).
+
+    Args:
+        db: Configured aiosqlite connection.
+        deposito_id: Id of the deposito to delete.
+        cascade: When True, hard-delete soft-deleted estantes that have no
+            movimientos (cascades to their ubicaciones and qr_cache files)
+            before deleting the deposito. Active estantes and soft-deleted
+            estantes WITH movimientos always block, regardless of this flag.
+
+    Returns:
+        ``{'ok': True, 'deleted_estantes': N, 'qr_files': M}`` on success.
+        ``{'ok': False, 'error': <code>}`` when deletion is blocked, where
+        ``<code>`` is one of:
+
+        - ``active_estantes`` — the deposito has active estantes; the caller
+          must move or soft-delete them first.
+        - ``soft_deleted_with_movs`` — the deposito has soft-deleted estantes
+          that still have movimientos; the audit trail must be preserved.
+        - ``soft_deleted_without_movs`` — the deposito has soft-deleted
+          estantes without movimientos; the caller should retry with
+          ``cascade=True`` (or surface a hint to that effect).
+        - ``not_found`` — the deposito row was gone by the time the DELETE
+          ran (caller should have checked existence separately).
     """
-    cursor = await db.execute("DELETE FROM depositos WHERE id = ?", (deposito_id,))
-    await db.commit()
-    return cursor.rowcount > 0
+    breakdown = await get_estantes_breakdown(db, deposito_id)
+
+    if breakdown["active"] > 0:
+        return {"ok": False, "error": "active_estantes"}
+    if breakdown["soft_deleted_with_movs"] > 0:
+        return {"ok": False, "error": "soft_deleted_with_movs"}
+
+    estante_ids_to_cascade: list[int] = []
+    if breakdown["soft_deleted_without_movs"] > 0:
+        if not cascade:
+            return {"ok": False, "error": "soft_deleted_without_movs"}
+        estante_ids_to_cascade = await _soft_deleted_estantes_without_movs(
+            db, deposito_id
+        )
+
+    # Snapshot qr_valores before deleting so we can clean the qr_cache after
+    # the commit (best-effort, never blocks the DB transaction).
+    qr_valores: list[str] = []
+    if estante_ids_to_cascade:
+        placeholders = ",".join("?" for _ in estante_ids_to_cascade)
+        async with db.execute(
+            f"SELECT qr_valor FROM ubicaciones WHERE estante_id IN ({placeholders})",
+            tuple(estante_ids_to_cascade),
+        ) as cursor:
+            qr_valores = [r[0] for r in await cursor.fetchall()]
+
+    await db.execute("BEGIN")
+    try:
+        if estante_ids_to_cascade:
+            placeholders = ",".join("?" for _ in estante_ids_to_cascade)
+            # Order matters: ubicaciones first (FK ON DELETE RESTRICT from
+            # movimientos AND from estantes), then estantes, then deposito.
+            await db.execute(
+                f"DELETE FROM ubicaciones WHERE estante_id IN ({placeholders})",
+                tuple(estante_ids_to_cascade),
+            )
+            await db.execute(
+                f"DELETE FROM estantes WHERE id IN ({placeholders})",
+                tuple(estante_ids_to_cascade),
+            )
+        cursor = await db.execute(
+            "DELETE FROM depositos WHERE id = ?",
+            (deposito_id,),
+        )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+
+    # Best-effort qr_cache cleanup (outside the DB transaction).
+    qr_files = 0
+    if qr_valores:
+        from app.services import qr as qr_service
+        for qr_valor in qr_valores:
+            qr_files += qr_service.delete_qr_cache_for(qr_valor)
+
+    if cursor.rowcount == 0:
+        return {"ok": False, "error": "not_found"}
+
+    return {
+        "ok": True,
+        "deleted_estantes": len(estante_ids_to_cascade),
+        "qr_files": qr_files,
+    }
+
+
+async def get_estantes_breakdown(
+    db: aiosqlite.Connection, deposito_id: int
+) -> dict:
+    """Categorize a deposito's estantes for the delete-guard.
+
+    Returns a dict with three counts:
+
+    - ``active``: ``deleted_at IS NULL`` — always blocks deposito deletion.
+    - ``soft_deleted_with_movs``: ``deleted_at IS NOT NULL`` AND at least one
+      of its ubicaciones has a movimiento — always blocks (audit trail).
+    - ``soft_deleted_without_movs``: ``deleted_at IS NOT NULL`` AND no
+      movimientos anywhere — blocks unless ``cascade=True`` is passed.
+    """
+    async with db.execute(
+        """
+        SELECT
+            e.id,
+            e.deleted_at,
+            EXISTS (
+                SELECT 1 FROM movimientos m
+                JOIN ubicaciones u ON u.id = m.ubicacion_id
+                WHERE u.estante_id = e.id
+            ) AS has_movs
+        FROM estantes e
+        WHERE e.deposito_id = ?
+        """,
+        (deposito_id,),
+    ) as cursor:
+        rows = await cursor.fetchall()
+
+    active = 0
+    soft_with_movs = 0
+    soft_without_movs = 0
+    for row in rows:
+        if row["deleted_at"] is None:
+            active += 1
+        elif row["has_movs"]:
+            soft_with_movs += 1
+        else:
+            soft_without_movs += 1
+    return {
+        "active": active,
+        "soft_deleted_with_movs": soft_with_movs,
+        "soft_deleted_without_movs": soft_without_movs,
+    }
+
+
+async def _soft_deleted_estantes_without_movs(
+    db: aiosqlite.Connection, deposito_id: int
+) -> list[int]:
+    """Return ids of soft-deleted estantes of ``deposito_id`` with no movimientos."""
+    async with db.execute(
+        """
+        SELECT e.id FROM estantes e
+        WHERE e.deposito_id = ? AND e.deleted_at IS NOT NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM movimientos m
+              JOIN ubicaciones u ON u.id = m.ubicacion_id
+              WHERE u.estante_id = e.id
+          )
+        """,
+        (deposito_id,),
+    ) as cursor:
+        return [r[0] for r in await cursor.fetchall()]
+
+
+async def hard_delete_estante_cascade(
+    db: aiosqlite.Connection, estante_id: int
+) -> dict:
+    """Hard-delete an estante, its ubicaciones, and qr_cache PNG files.
+
+    Caller MUST verify the estante has no movimientos referencing its
+    ubicaciones — ``movimientos.ubicacion_id`` is ``ON DELETE RESTRICT`` and
+    will raise ``IntegrityError`` otherwise.
+
+    Returns ``{'ubicaciones': N, 'qr_files': M}``.
+    """
+    async with db.execute(
+        "SELECT qr_valor FROM ubicaciones WHERE estante_id = ?",
+        (estante_id,),
+    ) as cursor:
+        qr_valores = [r[0] for r in await cursor.fetchall()]
+
+    await db.execute("BEGIN")
+    try:
+        await db.execute(
+            "DELETE FROM ubicaciones WHERE estante_id = ?",
+            (estante_id,),
+        )
+        await db.execute("DELETE FROM estantes WHERE id = ?", (estante_id,))
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+
+    from app.services import qr as qr_service
+    qr_files = 0
+    for qr_valor in qr_valores:
+        qr_files += qr_service.delete_qr_cache_for(qr_valor)
+
+    return {"ubicaciones": len(qr_valores), "qr_files": qr_files}
 
 
 async def count_estantes_for_deposito(

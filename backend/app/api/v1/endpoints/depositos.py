@@ -8,7 +8,7 @@ global admin via ``require_admin``.
 from sqlite3 import IntegrityError
 
 import aiosqlite
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.api.v1.deps import get_current_user, get_deposito_ids_for_user, require_admin
 from app.core.database import get_db
@@ -129,15 +129,29 @@ async def update_deposito(
 @router.delete("/{deposito_id}")
 async def delete_deposito(
     deposito_id: int,
+    cascade: bool = Query(
+        default=False,
+        description="Force-delete soft-deleted estantes without movimientos "
+        "along with the deposito. Active estantes and soft-deleted estantes "
+        "with movimientos always block, regardless of this flag.",
+    ),
     db: aiosqlite.Connection = Depends(get_db),
     admin: UsuarioResponse = Depends(require_admin),
 ):
     """Delete a deposito. Requires admin.
 
-    Rejects deletion with 400 when the deposito has estantes assigned —
-    including soft-deleted ones, since the ``estantes.deposito_id`` FK has no
-    ON DELETE clause and SQLite blocks the DELETE regardless of soft-delete
-    status — or when it is the last remaining deposito.
+    Blocking rules (in order):
+
+    - **Active estantes**: the deposito has non-soft-deleted estantes. They
+      must be moved or soft-deleted first. Always 400.
+    - **Soft-deleted estantes WITH movimientos**: the audit trail must be
+      preserved. Always 400.
+    - **Soft-deleted estantes WITHOUT movimientos**: 400 unless
+      ``?cascade=true`` is passed, in which case they are hard-deleted
+      (cascades to their ubicaciones and qr_cache files) along with the
+      deposito.
+    - **Last deposito**: at least one deposito must remain. Always 400.
+
     ``usuario_deposito`` assignments are removed by ON DELETE CASCADE.
     """
     deposito = await deposito_repository.get_deposito_by_id(db, deposito_id)
@@ -147,20 +161,44 @@ async def delete_deposito(
             detail="Depósito no encontrado",
         )
 
-    estantes_count = await deposito_repository.count_estantes_for_deposito(
-        db, deposito_id
-    )
-    if estantes_count > 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No se puede eliminar: tiene estantes asignados (incluyendo dados de baja)",
-        )
-
     if await deposito_repository.count_depositos(db) <= 1:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Debe existir al menos un depósito",
         )
 
-    await deposito_repository.delete_deposito(db, deposito_id)
-    return {"ok": True}
+    result = await deposito_repository.delete_deposito(
+        db, deposito_id, cascade=cascade
+    )
+
+    if result.get("ok"):
+        return {
+            "ok": True,
+            "deleted_estantes": result.get("deleted_estantes", 0),
+            "qr_files": result.get("qr_files", 0),
+        }
+
+    error = result.get("error")
+    if error == "active_estantes":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No se puede eliminar: tiene estantes activos asignados. "
+            "Trasladálos o eliminálos primero.",
+        )
+    if error == "soft_deleted_with_movs":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No se puede eliminar: tiene estantes dados de baja con "
+            "movimientos. Contacte al administrador.",
+        )
+    if error == "soft_deleted_without_movs":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Se encontraron estantes dados de baja sin movimientos. "
+            "Use ?cascade=true para eliminarlos junto con el depósito.",
+        )
+    # ``not_found`` should not happen here (we checked above), but guard anyway.
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Error inesperado al eliminar el depósito",
+    )
