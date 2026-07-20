@@ -4,8 +4,9 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 # Install dependencies — cached layer, only re-builds when package files change
-COPY package.json ./
-RUN npm install
+# Copy both package.json and package-lock.json for reproducible builds
+COPY package.json package-lock.json ./
+RUN npm ci
 
 # Copy source and build the static SPA (adapter-static outputs to build/)
 COPY . .
