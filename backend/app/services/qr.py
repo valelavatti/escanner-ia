@@ -79,6 +79,27 @@ def _save_image_atomic(img: Image, target: Path) -> None:
         raise
 
 
+def delete_qr_cache_for(qr_valor: str) -> int:
+    """Delete every cached PNG for ``qr_valor`` (any size). Returns count removed.
+
+    Best-effort: missing files or permission errors are silently skipped so a
+    stale cache entry never blocks a hard-delete cascade.
+    """
+    settings = get_settings()
+    cache_dir = Path(settings.qr_cache_dir)
+    if not cache_dir.exists():
+        return 0
+    sanitized = _sanitize_qr_valor(qr_valor)
+    removed = 0
+    for path in cache_dir.glob(f"{sanitized}_*.png"):
+        try:
+            path.unlink()
+            removed += 1
+        except OSError:
+            pass
+    return removed
+
+
 async def get_or_create_qr_path(qr_valor: str, size: int) -> Path:
     """Return the cached PNG path for ``qr_valor``, generating it if needed."""
     target = _cache_path(qr_valor, size)
