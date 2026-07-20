@@ -113,8 +113,8 @@
 					cameraConfig,
 					{
 						fps: 10,
-						qrbox: { width: 250, height: 250 },
-						aspectRatio: 1.333333,
+						qrbox: { width: 280, height: 280 },
+						aspectRatio: 1,
 						disableFlip: false
 					},
 					(decodedText: string, result: unknown) => {
@@ -284,10 +284,11 @@
 	.scanner__reader-wrapper {
 		position: relative;
 		flex: 1 1 auto;
-		min-height: 60vh;
+		min-height: 0;
 		width: 100%;
+		aspect-ratio: 1 / 1;
 		background-color: #0f172a;
-		border-radius: 0;
+		border-radius: 0.75rem;
 		overflow: hidden;
 	}
 

@@ -632,9 +632,7 @@
 		position: relative;
 		flex: 1 1 auto;
 		min-height: 0;
-		width: 100vw;
-		margin-left: calc(-1 * (100vw - 100%) / 2);
-		margin-right: calc(-1 * (100vw - 100%) / 2);
+		width: 100%;
 	}
 
 	.flash {
