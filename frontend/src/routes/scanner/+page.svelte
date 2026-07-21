@@ -438,6 +438,16 @@
 			fila: ubicacion.fila,
 			columna: ubicacion.columna
 		};
+
+		// When the product-locations card is visible the user is picking a
+		// location for the already-scanned product: close the modal and run the
+		// same finalize path as handleSelectLocation / handleSectorScan.
+		if (showLocationsCard && scannedBarcodePending) {
+			showLocationModal = false;
+			void finalizeLocationSelection(anchored, scannedBarcodePending);
+			return;
+		}
+
 		anchoredLocation.set(anchored);
 		clearScannedProduct();
 		showGreenFlash(`Ubicación anclada: ${ubicacion.estante_nombre} ${ubicacion.qr_valor}`);
