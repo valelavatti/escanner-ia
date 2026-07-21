@@ -29,7 +29,25 @@
 	const currentStock = $derived(product.ubicacion_stock?.stock_actual ?? 0);
 	const isAssigned = $derived(product.ubicacion_stock?.is_assigned ?? false);
 	const existingProductoSku = $derived(product.ubicacion_stock?.existing_producto_sku ?? null);
+	const existingProductoStock = $derived(product.ubicacion_stock?.existing_producto_stock ?? null);
 	const showStockGeneral = $derived(stockTotal > currentStock);
+
+	// A destructive reassignment only happens when the location holds units of
+	// another product; in that case the user must explicitly confirm.
+	const needsReassignConfirm = $derived(
+		existingProductoSku !== null && (existingProductoStock ?? 0) > 0
+	);
+
+	let confirmReassign = $state(false);
+
+	// Reset the confirmation whenever a different product (or conflict) is scanned.
+	$effect(() => {
+		product.sku;
+		existingProductoSku;
+		confirmReassign = false;
+	});
+
+	const saveDisabled = $derived(needsReassignConfirm && !confirmReassign);
 </script>
 
 <div class="product-card">
@@ -44,9 +62,26 @@
 
 	{#if existingProductoSku}
 		<div class="product-card__warning" role="alert">
-			⚠️ Esta ubicación ya tiene otro producto: <strong>{existingProductoSku}</strong>.
-			Al guardar, se reasignará al nuevo producto y el stock arrancará desde 0.
+			{#if (existingProductoStock ?? 0) > 0}
+				⚠️ Esta ubicación ya tiene otro producto: <strong>{existingProductoSku}</strong>
+				con <strong>{existingProductoStock}</strong> unidades. Al guardar, esas unidades se
+				eliminarán del stock de <strong>{existingProductoSku}</strong> y esta ubicación
+				arrancará desde 0 con el nuevo producto.
+			{:else}
+				⚠️ Esta ubicación ya tiene otro producto: <strong>{existingProductoSku}</strong>.
+				Al guardar, se reasignará al nuevo producto.
+			{/if}
 		</div>
+	{/if}
+
+	{#if needsReassignConfirm}
+		<label class="product-card__confirm">
+			<input type="checkbox" bind:checked={confirmReassign} />
+			<span>
+				Entiendo que se eliminarán {existingProductoStock} unidades del stock de
+				{existingProductoSku}
+			</span>
+		</label>
 	{/if}
 
 	<div class="product-card__stock" class:product-card__stock--new={!isAssigned}>
@@ -65,6 +100,7 @@
 		{currentStock}
 		{stockTotal}
 		{isSaving}
+		{saveDisabled}
 		{onQuantityChange}
 		{onModeChange}
 		{onSave}
@@ -150,5 +186,31 @@
 		background-color: #fef3c7;
 		border: 1px solid #fcd34d;
 		border-radius: 0.5rem;
+	}
+
+	.product-card__confirm {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		min-height: 3rem;
+		padding: 0.75rem 1rem;
+		font-size: 0.875rem;
+		font-weight: 600;
+		line-height: 1.4;
+		color: #92400e;
+		background-color: #fef3c7;
+		border: 1px solid #fcd34d;
+		border-radius: 0.5rem;
+		cursor: pointer;
+		touch-action: manipulation;
+	}
+
+	.product-card__confirm input {
+		flex-shrink: 0;
+		width: 1.25rem;
+		height: 1.25rem;
+		margin: 0;
+		accent-color: #b45309;
+		cursor: pointer;
 	}
 </style>

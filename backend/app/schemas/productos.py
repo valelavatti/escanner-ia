@@ -16,6 +16,10 @@ class UbicacionStockInfo(BaseModel):
         default=None,
         description="If the location already has a different product, its SKU",
     )
+    existing_producto_stock: Optional[int] = Field(
+        default=None,
+        description="Live stock of the existing product that would be lost on reassignment",
+    )
 
 
 class ProductOut(BaseModel):

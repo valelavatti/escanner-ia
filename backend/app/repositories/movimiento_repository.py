@@ -382,11 +382,19 @@ async def get_producto_ubicacion_stock(
             else None
         )
 
+    # Live stock of the product currently occupying the location. These are
+    # the units that would silently vanish from that product's stock total if
+    # the location gets reassigned to the scanned product.
+    existing_producto_stock = (
+        ubicacion["stock_actual"] if existing_producto_sku is not None else None
+    )
+
     return {
         "stock_actual": stock,
         "is_assigned": is_assigned,
         "es_suelto": es_suelto,
         "existing_producto_sku": existing_producto_sku,
+        "existing_producto_stock": existing_producto_stock,
     }
 
 

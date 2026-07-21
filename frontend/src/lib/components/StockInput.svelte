@@ -5,6 +5,8 @@
 		currentStock: number;
 		stockTotal: number;
 		isSaving: boolean;
+		/** External veto on saving (e.g. pending destructive-action confirmation). */
+		saveDisabled?: boolean;
 		onQuantityChange: (value: number) => void;
 		onModeChange: (mode: 'alta' | 'ajuste') => void;
 		onSave: () => void;
@@ -17,6 +19,7 @@
 		currentStock,
 		stockTotal,
 		isSaving,
+		saveDisabled = false,
 		onQuantityChange,
 		onModeChange,
 		onSave,
@@ -34,7 +37,9 @@
 		mode === 'alta' ? stockTotal + quantity : stockTotal - currentStock + quantity
 	);
 	const showResultGeneral = $derived(stockTotal > currentStock);
-	const canSave = $derived(!isSaving && Number.isFinite(quantity) && quantity >= 0);
+	const canSave = $derived(
+		!isSaving && !saveDisabled && Number.isFinite(quantity) && quantity >= 0
+	);
 </script>
 
 <div class="stock-input">

@@ -279,6 +279,7 @@ export interface UbicacionStockInfo {
 	stock_actual: number;
 	is_assigned: boolean;
 	existing_producto_sku: string | null;
+	existing_producto_stock: number | null;
 }
 
 export interface ProductWithUbicacionStock extends Product {

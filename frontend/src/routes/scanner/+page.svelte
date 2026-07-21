@@ -614,7 +614,11 @@
 						{:else}
 							<option value="" disabled selected>Seleccione una ubicación</option>
 							{#each ubicaciones as u}
-								<option value={u.id}>{u.qr_valor}</option>
+								<option value={u.id}
+									>{u.qr_valor}{u.producto_sku
+										? ` — OCUPADA: ${u.producto_sku} (${u.stock_actual} u.)`
+										: ''}</option
+								>
 							{/each}
 						{/if}
 					</select>
