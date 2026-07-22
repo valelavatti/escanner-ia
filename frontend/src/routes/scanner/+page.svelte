@@ -55,6 +55,8 @@
 	let greenFlashTimeout: ReturnType<typeof setTimeout> | null = null;
 	let errorFlash = $state<string | null>(null);
 	let errorFlashTimeout: ReturnType<typeof setTimeout> | null = null;
+	let infoFlash = $state<string | null>(null);
+	let infoFlashTimeout: ReturnType<typeof setTimeout> | null = null;
 
 	let showLocationModal = $state(false);
 	let depositos = $state<Deposito[]>([]);
@@ -85,6 +87,14 @@
 		errorFlashTimeout = setTimeout(() => {
 			errorFlash = null;
 		}, 3000);
+	}
+
+	function showInfoFlash(message: string) {
+		infoFlash = message;
+		if (infoFlashTimeout) clearTimeout(infoFlashTimeout);
+		infoFlashTimeout = setTimeout(() => {
+			infoFlash = null;
+		}, 2500);
 	}
 
 	async function handleScan(decodedText: string, formatName: string) {
@@ -180,6 +190,15 @@
 			anchoredLocation.set(anchored);
 			clearScannedProduct();
 			showGreenFlash(`Ubicación anclada: ${ubicacion.estante_nombre} ${ubicacion.qr_valor}`);
+			// Info flash: if the anchored location already holds a product, tell the
+			// operator what is stored there (additive — the green flash still shows).
+			if (ubicacion.producto_sku) {
+				const desc = ubicacion.producto_descripcion?.trim();
+				const descPart = desc ? ` — ${desc.substring(0, 40)}` : '';
+				showInfoFlash(
+					`En esta ubicación: ${ubicacion.producto_sku}${descPart} (${ubicacion.stock_actual} u.)`
+				);
+			}
 		} catch (err) {
 			if (err instanceof ApiError && err.status === 403) {
 				showError('No tenés permiso para este depósito');
@@ -487,6 +506,12 @@
 				{errorFlash}
 			</div>
 		{/if}
+
+		{#if infoFlash}
+			<div class="flash flash--info" transition:fade={{ duration: 150 }}>
+				{infoFlash}
+			</div>
+		{/if}
 	</div>
 
 	<div class="scanner-page__status" class:scanner-page__status--error={$scannerState === 'error'}>
@@ -669,6 +694,11 @@
 	.flash--red {
 		bottom: 0;
 		background-color: #dc2626;
+	}
+
+	.flash--info {
+		top: 3.25rem;
+		background-color: #1d4ed8;
 	}
 
 	.scanner-page__status {
