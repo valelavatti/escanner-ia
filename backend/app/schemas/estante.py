@@ -1,7 +1,7 @@
 """Pydantic schemas for estantes and ubicaciones."""
 
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -12,6 +12,10 @@ class EstanteCreate(BaseModel):
     filas: int = Field(..., ge=1, le=50)
     columnas: int = Field(..., ge=1, le=50)
     deposito_id: Optional[int] = None
+    fila_order: Literal["top_down", "bottom_up"] = "top_down"
+    columna_order: Literal["left_right", "right_left"] = "left_right"
+    fila_format: Literal["numeric", "alpha"] = "numeric"
+    columna_format: Literal["numeric", "alpha"] = "numeric"
 
 
 class EstanteUpdate(BaseModel):
@@ -31,6 +35,10 @@ class EstanteResponse(BaseModel):
     deleted_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     ubicaciones_count: int = 0
+    fila_order: str = "top_down"
+    columna_order: str = "left_right"
+    fila_format: str = "numeric"
+    columna_format: str = "numeric"
 
 
 class UbicacionResponse(BaseModel):
@@ -39,6 +47,8 @@ class UbicacionResponse(BaseModel):
     estante_nombre: str
     fila: int
     columna: int
+    fila_label: str
+    columna_label: str
     producto_id: Optional[str] = None
     producto_sku: Optional[str] = None
     producto_descripcion: Optional[str] = None

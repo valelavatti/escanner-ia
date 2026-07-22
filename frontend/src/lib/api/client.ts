@@ -225,6 +225,10 @@ export interface Estante {
 	deleted_at: string | null;
 	created_at: string;
 	ubicaciones_count: number;
+	fila_order: string;
+	columna_order: string;
+	fila_format: string;
+	columna_format: string;
 	ubicaciones?: Ubicacion[];
 }
 
@@ -234,6 +238,8 @@ export interface Ubicacion {
 	estante_nombre: string;
 	fila: number;
 	columna: number;
+	fila_label: string;
+	columna_label: string;
 	producto_id: string | null;
 	producto_sku: string | null;
 	producto_descripcion: string | null;
@@ -248,6 +254,10 @@ export interface EstanteCreate {
 	filas: number;
 	columnas: number;
 	deposito_id?: number | null;
+	fila_order?: string;
+	columna_order?: string;
+	fila_format?: string;
+	columna_format?: string;
 }
 
 export interface EstanteUpdate {
@@ -297,6 +307,8 @@ export interface ProductoUbicacionItem {
 	qr_valor: string;
 	fila: number;
 	columna: number;
+	fila_label: string;
+	columna_label: string;
 	stock: number;
 	deposito_nombre: string;
 }
@@ -327,6 +339,8 @@ export interface MovimientoResponse {
 	estante_nombre: string;
 	fila: number;
 	columna: number;
+	fila_label: string;
+	columna_label: string;
 	cantidad: number;
 	stock_anterior: number;
 	stock_nuevo: number;

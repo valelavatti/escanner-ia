@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.api.v1.deps import get_current_user, get_deposito_ids_for_user
 from app.core.database import get_db
-from app.repositories import movimiento_repository, producto_repository
+from app.repositories import movimiento_repository, producto_repository, ubicacion_repository
 from app.schemas.auth import UsuarioResponse
 from app.schemas.productos import (
     ProductOut,
@@ -97,23 +97,28 @@ async def get_producto_ubicaciones(
     )
 
     stock_total = sum(int(u["stock"]) for u in ubicaciones)
-    return ProductoUbicacionesResponse(
-        sku=row["sku"],
-        descripcion=row["descripcion"],
-        codigo_de_barra=row["codigo_de_barra"],
-        stock_total=stock_total,
-        ubicaciones=[
+    items = []
+    for u in ubicaciones:
+        fila_label, columna_label = ubicacion_repository.compute_labels(u)
+        items.append(
             ProductoUbicacionItem(
                 ubicacion_id=u["ubicacion_id"],
                 estante_nombre=u["estante_nombre"],
                 qr_valor=u["qr_valor"],
                 fila=u["fila"],
                 columna=u["columna"],
+                fila_label=fila_label,
+                columna_label=columna_label,
                 stock=int(u["stock"]),
                 deposito_nombre=u["deposito_nombre"],
             )
-            for u in ubicaciones
-        ],
+        )
+    return ProductoUbicacionesResponse(
+        sku=row["sku"],
+        descripcion=row["descripcion"],
+        codigo_de_barra=row["codigo_de_barra"],
+        stock_total=stock_total,
+        ubicaciones=items,
     )
 
 

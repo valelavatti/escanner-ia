@@ -45,16 +45,23 @@ def _estante_response(row: dict) -> EstanteResponse:
         deleted_at=row.get("deleted_at"),
         created_at=row.get("created_at"),
         ubicaciones_count=row.get("ubicaciones_count", 0),
+        fila_order=row.get("fila_order") or "top_down",
+        columna_order=row.get("columna_order") or "left_right",
+        fila_format=row.get("fila_format") or "numeric",
+        columna_format=row.get("columna_format") or "numeric",
     )
 
 
 def _ubicacion_response(row: dict) -> UbicacionResponse:
+    fila_label, columna_label = ubicacion_repository.compute_labels(row)
     return UbicacionResponse(
         id=row["id"],
         estante_id=row["estante_id"],
         estante_nombre=row["estante_nombre"],
         fila=row["fila"],
         columna=row["columna"],
+        fila_label=fila_label,
+        columna_label=columna_label,
         producto_id=row.get("producto_id"),
         producto_sku=row.get("producto_sku") or row.get("producto_id"),
         producto_descripcion=row.get("producto_descripcion"),
@@ -90,6 +97,10 @@ async def create_estante(
             data.filas,
             data.columnas,
             deposito_id=data.deposito_id,
+            fila_order=data.fila_order,
+            columna_order=data.columna_order,
+            fila_format=data.fila_format,
+            columna_format=data.columna_format,
         )
     except IntegrityError:
         raise HTTPException(

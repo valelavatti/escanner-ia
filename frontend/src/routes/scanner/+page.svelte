@@ -176,7 +176,9 @@
 				estante_nombre: ubicacion.estante_nombre,
 				qr_valor: ubicacion.qr_valor,
 				fila: ubicacion.fila,
-				columna: ubicacion.columna
+				columna: ubicacion.columna,
+				fila_label: ubicacion.fila_label,
+				columna_label: ubicacion.columna_label
 			};
 
 			if (showLocationsCard) {
@@ -336,7 +338,9 @@
 			estante_nombre: loc.estante_nombre,
 			qr_valor: loc.qr_valor,
 			fila: loc.fila,
-			columna: loc.columna
+			columna: loc.columna,
+			fila_label: loc.fila_label,
+			columna_label: loc.columna_label
 		};
 		// Pause the camera (entering stock-entry mode) and load the product WITH
 		// stock for the newly-anchored location — reuses the existing
@@ -455,7 +459,9 @@
 			estante_nombre: ubicacion.estante_nombre,
 			qr_valor: ubicacion.qr_valor,
 			fila: ubicacion.fila,
-			columna: ubicacion.columna
+			columna: ubicacion.columna,
+			fila_label: ubicacion.fila_label,
+			columna_label: ubicacion.columna_label
 		};
 
 		// When the product-locations card is visible the user is picking a
@@ -537,7 +543,7 @@
 		{#if $anchoredLocation}
 			<span class="location-pin">📍</span>
 			<span class="location-text">
-				{$anchoredLocation.estante_nombre} — F{$anchoredLocation.fila}-C{$anchoredLocation.columna}
+				{$anchoredLocation.estante_nombre} — F{$anchoredLocation.fila_label ?? $anchoredLocation.fila}-C{$anchoredLocation.columna_label ?? $anchoredLocation.columna}
 			</span>
 			<button
 				type="button"

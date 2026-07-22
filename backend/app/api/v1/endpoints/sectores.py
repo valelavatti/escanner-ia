@@ -13,12 +13,15 @@ router = APIRouter()
 
 
 def _ubicacion_response(row: dict) -> UbicacionResponse:
+    fila_label, columna_label = ubicacion_repository.compute_labels(row)
     return UbicacionResponse(
         id=row["id"],
         estante_id=row["estante_id"],
         estante_nombre=row["estante_nombre"],
         fila=row["fila"],
         columna=row["columna"],
+        fila_label=fila_label,
+        columna_label=columna_label,
         producto_id=row.get("producto_id"),
         producto_sku=row.get("producto_sku") or row.get("producto_id"),
         producto_descripcion=row.get("producto_descripcion"),

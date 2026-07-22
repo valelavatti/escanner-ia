@@ -53,7 +53,7 @@
 							{#if loc.estante_nombre === 'Suelto'}
 								<span class="location-row__pill">Suelto</span>
 							{:else}
-								<span class="location-row__tag">F{loc.fila}-C{loc.columna}</span>
+								<span class="location-row__tag">F{loc.fila_label}-C{loc.columna_label}</span>
 							{/if}
 							<span class="location-row__qr">{loc.qr_valor}</span>
 							<span class="location-row__deposito">{loc.deposito_nombre}</span>

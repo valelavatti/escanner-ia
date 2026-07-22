@@ -64,7 +64,7 @@
 			{selectedUbicacion.estante_nombre} — {selectedUbicacion.qr_valor}
 		</h3>
 		<div class="detail-panel__coords">
-			Fila {selectedUbicacion.fila} · Columna {selectedUbicacion.columna}
+			Fila {selectedUbicacion.fila_label} · Columna {selectedUbicacion.columna_label}
 		</div>
 
 		{#if selectedUbicacion.producto_sku}

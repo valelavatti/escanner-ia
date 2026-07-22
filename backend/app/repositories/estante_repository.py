@@ -97,24 +97,35 @@ async def create_estante(
     filas: int,
     columnas: int,
     deposito_id: Optional[int] = None,
+    fila_order: str = "top_down",
+    columna_order: str = "left_right",
+    fila_format: str = "numeric",
+    columna_format: str = "numeric",
 ) -> int:
     """Insert a new estante and auto-generate its ubicaciones.
 
     The whole operation is wrapped in a transaction so a failure to generate
-    cells rolls back the estante insert.
+    cells rolls back the estante insert. The label config defaults reproduce
+    the historic labeling (top-down, left-to-right, numeric).
     """
     try:
         await db.execute("BEGIN")
         cursor = await db.execute(
             """
-            INSERT INTO estantes (nombre, orden_visual, filas, columnas, deposito_id)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO estantes (nombre, orden_visual, filas, columnas, deposito_id,
+                                  fila_order, columna_order, fila_format, columna_format)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (nombre, orden_visual, filas, columnas, deposito_id),
+            (nombre, orden_visual, filas, columnas, deposito_id,
+             fila_order, columna_order, fila_format, columna_format),
         )
         estante_id = cursor.lastrowid
         await ubicacion_repository.auto_generate_ubicaciones(
-            db, estante_id, nombre, filas, columnas
+            db, estante_id, nombre, filas, columnas,
+            fila_order=fila_order,
+            columna_order=columna_order,
+            fila_format=fila_format,
+            columna_format=columna_format,
         )
         await db.commit()
         return estante_id
@@ -160,8 +171,13 @@ async def update_estante_dimensions(
         shrunk = filas < old_filas or columnas < old_columnas
 
         if expanded:
+            # New cells get labels from the estante's stored label config.
             await ubicacion_repository.auto_generate_ubicaciones(
-                db, estante_id, current["nombre"], filas, columnas
+                db, estante_id, current["nombre"], filas, columnas,
+                fila_order=current.get("fila_order") or "top_down",
+                columna_order=current.get("columna_order") or "left_right",
+                fila_format=current.get("fila_format") or "numeric",
+                columna_format=current.get("columna_format") or "numeric",
             )
             # Reactivate cells that were previously flagged but are now in bounds.
             await db.execute(

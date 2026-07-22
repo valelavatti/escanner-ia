@@ -226,7 +226,7 @@
 	}
 
 	function formatUbicacion(m: MovimientoResponse): string {
-		return `${m.estante_nombre} F${m.fila}-C${m.columna} — ${m.ubicacion_qr}`;
+		return `${m.estante_nombre} F${m.fila_label}-C${m.columna_label} — ${m.ubicacion_qr}`;
 	}
 </script>
 

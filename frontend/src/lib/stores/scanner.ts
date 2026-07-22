@@ -6,6 +6,8 @@ export interface AnchoredLocation {
 	qr_valor: string;
 	fila: number;
 	columna: number;
+	fila_label?: string;
+	columna_label?: string;
 }
 
 export const anchoredLocation = writable<AnchoredLocation | null>(null);

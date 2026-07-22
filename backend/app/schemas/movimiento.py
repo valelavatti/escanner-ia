@@ -32,6 +32,8 @@ class MovimientoResponse(BaseModel):
     estante_nombre: str
     fila: int
     columna: int
+    fila_label: str
+    columna_label: str
     cantidad: int
     stock_anterior: int
     stock_nuevo: int

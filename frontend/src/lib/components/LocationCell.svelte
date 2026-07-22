@@ -58,7 +58,7 @@
 	aria-label={cellAriaLabel}
 	title={ubicacion.qr_valor}
 >
-	<span class="cell__coords">{ubicacion.fila}-{ubicacion.columna}</span>
+	<span class="cell__coords">{ubicacion.fila_label}-{ubicacion.columna_label}</span>
 	<span class="cell__qr">{ubicacion.qr_valor}</span>
 	{#if ubicacion.producto_sku}
 		<span class="cell__sku">{ubicacion.producto_sku}</span>

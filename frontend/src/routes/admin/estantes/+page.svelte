@@ -42,6 +42,10 @@
 	let createFilas = $state(1);
 	let createColumnas = $state(1);
 	let createDepositoId = $state<number | null>(null);
+	let createFilaOrder = $state('top_down');
+	let createColumnaOrder = $state('left_right');
+	let createFilaFormat = $state('numeric');
+	let createColumnaFormat = $state('numeric');
 	let creating = $state(false);
 
 	// Edit form
@@ -89,11 +93,66 @@
 		return estante.nombre === SYSTEM_SHELF_NAME;
 	}
 
-	function qrPreview(nombre: string, filas: number, columnas: number): string {
+	// Mirror of backend generate_qr_valor — keep in sync
+	// (backend/app/repositories/ubicacion_repository.py)
+	function toAlpha(n: number): string {
+		let result = '';
+		while (n > 0) {
+			const rem = (n - 1) % 26;
+			n = Math.floor((n - 1) / 26);
+			result = String.fromCharCode(65 + rem) + result;
+		}
+		return result;
+	}
+
+	function formatAxisLabel(index: number, fmt: string): string {
+		return fmt === 'alpha' ? toAlpha(index) : String(index);
+	}
+
+	function effectiveLabelIndex(position: number, size: number, order: string): number {
+		return order === 'bottom_up' || order === 'right_left' ? size - position + 1 : position;
+	}
+
+	function generateQrValor(
+		nombre: string,
+		fila: number,
+		columna: number,
+		filas: number,
+		columnas: number,
+		filaOrder: string,
+		columnaOrder: string,
+		filaFormat: string,
+		columnaFormat: string
+	): string {
+		const filaLabel = formatAxisLabel(effectiveLabelIndex(fila, filas, filaOrder), filaFormat);
+		const columnaLabel = formatAxisLabel(
+			effectiveLabelIndex(columna, columnas, columnaOrder),
+			columnaFormat
+		);
+		if (filas === 1 && columnas === 1) return nombre;
+		if (filas === 1) return `${nombre}-C${columnaLabel}`;
+		if (columnas === 1) return `${nombre}-F${filaLabel}`;
+		return `${nombre}-F${filaLabel}-C${columnaLabel}`;
+	}
+
+	function qrPreview(
+		nombre: string,
+		filas: number,
+		columnas: number,
+		filaOrder: string,
+		columnaOrder: string,
+		filaFormat: string,
+		columnaFormat: string
+	): string {
 		if (filas === 1 && columnas === 1) return `QR ejemplo: ${nombre}`;
-		if (filas === 1) return `QR ejemplo: ${nombre}-C1`;
-		if (columnas === 1) return `QR ejemplo: ${nombre}-F1`;
-		return `QR ejemplo: ${nombre}-F1-C1`;
+		// Show the first and last stored corners so both extremes of each axis are visible.
+		const first = generateQrValor(
+			nombre, 1, 1, filas, columnas, filaOrder, columnaOrder, filaFormat, columnaFormat
+		);
+		const last = generateQrValor(
+			nombre, filas, columnas, filas, columnas, filaOrder, columnaOrder, filaFormat, columnaFormat
+		);
+		return `QR ejemplo: ${first} … ${last}`;
 	}
 
 	function cellClass(ubicacion: Ubicacion): string {
@@ -205,6 +264,10 @@
 		createFilas = 1;
 		createColumnas = 1;
 		createDepositoId = depositos.length > 0 ? depositos[0].id : null;
+		createFilaOrder = 'top_down';
+		createColumnaOrder = 'left_right';
+		createFilaFormat = 'numeric';
+		createColumnaFormat = 'numeric';
 		createOpen = false;
 	}
 
@@ -228,7 +291,11 @@
 				orden_visual: Number(createOrden),
 				filas,
 				columnas,
-				deposito_id: createDepositoId
+				deposito_id: createDepositoId,
+				fila_order: createFilaOrder,
+				columna_order: createColumnaOrder,
+				fila_format: createFilaFormat,
+				columna_format: createColumnaFormat
 			});
 			resetCreateForm();
 			await loadEstantes();
@@ -493,7 +560,7 @@
 							{#if estante.deposito_nombre}
 								<span>{estante.deposito_nombre}</span>
 							{/if}
-							<span class="qr-preview">{qrPreview(estante.nombre, estante.filas, estante.columnas)}</span>
+							<span class="qr-preview">{qrPreview(estante.nombre, estante.filas, estante.columnas, estante.fila_order, estante.columna_order, estante.fila_format, estante.columna_format)}</span>
 						</div>
 
 						<div class="estante-card__actions">
@@ -568,7 +635,7 @@
 				>
 				{#each activeUbicaciones as ubicacion (ubicacion.id)}
 					<div class={cellClass(ubicacion)}>
-						<span class="cell__coords">{ubicacion.fila}-{ubicacion.columna}</span>
+						<span class="cell__coords">{ubicacion.fila_label}-{ubicacion.columna_label}</span>
 						<span class="cell__qr">{ubicacion.qr_valor}</span>
 						{#if ubicacion.producto_id}
 							<span class="cell__product">{ubicacion.producto_sku}</span>
@@ -658,8 +725,32 @@
 				{/each}
 			</select>
 
+			<label class="field-label" for="create-fila-order">Dirección de filas</label>
+			<select id="create-fila-order" class="field-input field-input--select" bind:value={createFilaOrder}>
+				<option value="top_down">De arriba hacia abajo</option>
+				<option value="bottom_up">De abajo hacia arriba</option>
+			</select>
+
+			<label class="field-label" for="create-columna-order">Dirección de columnas</label>
+			<select id="create-columna-order" class="field-input field-input--select" bind:value={createColumnaOrder}>
+				<option value="left_right">De izquierda a derecha</option>
+				<option value="right_left">De derecha a izquierda</option>
+			</select>
+
+			<label class="field-label" for="create-fila-format">Formato de filas</label>
+			<select id="create-fila-format" class="field-input field-input--select" bind:value={createFilaFormat}>
+				<option value="numeric">Números (1, 2, 3…)</option>
+				<option value="alpha">Letras (A, B, C…)</option>
+			</select>
+
+			<label class="field-label" for="create-columna-format">Formato de columnas</label>
+			<select id="create-columna-format" class="field-input field-input--select" bind:value={createColumnaFormat}>
+				<option value="numeric">Números (1, 2, 3…)</option>
+				<option value="alpha">Letras (A, B, C…)</option>
+			</select>
+
 			<p class="qr-preview qr-preview--standalone">
-				{qrPreview(createNombre || 'Nombre', Number(createFilas) || 1, Number(createColumnas) || 1)}
+				{qrPreview(createNombre || 'Nombre', Number(createFilas) || 1, Number(createColumnas) || 1, createFilaOrder, createColumnaOrder, createFilaFormat, createColumnaFormat)}
 			</p>
 
 			<div class="modal-actions">
@@ -765,7 +856,7 @@
 				{#each pendingUpdate.outOfBounds as ubicacion}
 					<li>
 						<strong>{ubicacion.qr_valor}</strong>
-						<span>(fila {ubicacion.fila}, col {ubicacion.columna})</span>
+						<span>(fila {ubicacion.fila_label}, col {ubicacion.columna_label})</span>
 						{#if ubicacion.producto_id}
 							<span> — {ubicacion.producto_sku} · stock {ubicacion.stock_actual}</span>
 						{/if}

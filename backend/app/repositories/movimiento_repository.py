@@ -319,6 +319,12 @@ async def get_movimiento_by_id(db: aiosqlite.Connection, movimiento_id: int) -> 
             e.deposito_id,
             ubi.fila,
             ubi.columna,
+            e.filas AS estante_filas,
+            e.columnas AS estante_columnas,
+            e.fila_order,
+            e.columna_order,
+            e.fila_format,
+            e.columna_format,
             m.cantidad,
             m.stock_anterior,
             m.stock_nuevo,
@@ -477,6 +483,12 @@ async def get_producto_ubicaciones(
             u.stock_actual AS stock,
             d.id AS deposito_id,
             d.nombre AS deposito_nombre,
+            e.filas AS estante_filas,
+            e.columnas AS estante_columnas,
+            e.fila_order,
+            e.columna_order,
+            e.fila_format,
+            e.columna_format,
             'regular' AS source
         FROM ubicaciones u
         JOIN estantes e ON e.id = u.estante_id
@@ -508,6 +520,12 @@ async def get_producto_ubicaciones(
             COALESCE(SUM(m.cantidad), 0) AS stock,
             d.id AS deposito_id,
             d.nombre AS deposito_nombre,
+            e.filas AS estante_filas,
+            e.columnas AS estante_columnas,
+            e.fila_order,
+            e.columna_order,
+            e.fila_format,
+            e.columna_format,
             'suelto' AS source
         FROM estantes e
         JOIN depositos d ON d.id = e.deposito_id
@@ -610,6 +628,12 @@ async def list_movimientos(
             e.deposito_id,
             ubi.fila,
             ubi.columna,
+            e.filas AS estante_filas,
+            e.columnas AS estante_columnas,
+            e.fila_order,
+            e.columna_order,
+            e.fila_format,
+            e.columna_format,
             m.cantidad,
             m.stock_anterior,
             m.stock_nuevo,

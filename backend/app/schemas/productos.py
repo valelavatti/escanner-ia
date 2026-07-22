@@ -46,6 +46,8 @@ class ProductoUbicacionItem(BaseModel):
     qr_valor: str
     fila: int
     columna: int
+    fila_label: str
+    columna_label: str
     stock: int
     deposito_nombre: str
 

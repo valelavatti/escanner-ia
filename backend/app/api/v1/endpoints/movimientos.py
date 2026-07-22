@@ -25,6 +25,7 @@ router = APIRouter()
 
 
 def _movimiento_response(row: dict) -> MovimientoResponse:
+    fila_label, columna_label = ubicacion_repository.compute_labels(row)
     return MovimientoResponse(
         id=row["id"],
         usuario_id=row["usuario_id"],
@@ -36,6 +37,8 @@ def _movimiento_response(row: dict) -> MovimientoResponse:
         estante_nombre=row["estante_nombre"],
         fila=row["fila"],
         columna=row["columna"],
+        fila_label=fila_label,
+        columna_label=columna_label,
         cantidad=row["cantidad"],
         stock_anterior=row["stock_anterior"],
         stock_nuevo=row["stock_nuevo"],
