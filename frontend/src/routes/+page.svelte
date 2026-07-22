@@ -12,7 +12,9 @@
 			<a href="/scanner" class="home__action">Escanear</a>
 			<a href="/mapa" class="home__action home__action--secondary">Ver mapa</a>
 			<a href="/historial" class="home__action home__action--secondary">Historial</a>
-			<a href="/admin/estantes" class="home__action home__action--secondary">Gestionar estantes</a>
+			{#if $sessionStore.usuario.is_admin || $sessionStore.depositos.some((d) => d.role === 'admin')}
+				<a href="/admin/estantes" class="home__action home__action--secondary">Gestionar estantes</a>
+			{/if}
 
 			{#if $sessionStore.usuario.is_admin}
 				<div class="home__admin-divider">

@@ -166,7 +166,9 @@ async def update_estante(
             detail="Estante no encontrado",
         )
 
-    await require_deposito_access(user, current.get("deposito_id"), db)
+    await require_deposito_role(
+        user, current.get("deposito_id"), db, allowed_roles={"admin"}
+    )
 
     old_filas = current["filas"]
     old_columnas = current["columnas"]
@@ -224,7 +226,9 @@ async def delete_estante(
             detail="Estante no encontrado",
         )
 
-    await require_deposito_access(user, estante.get("deposito_id"), db)
+    await require_deposito_role(
+        user, estante.get("deposito_id"), db, allowed_roles={"admin"}
+    )
 
     deleted = await estante_repository.soft_delete_estante(db, estante_id)
     if not deleted:
@@ -253,7 +257,9 @@ async def confirm_delete_out_of_bounds(
             detail="Estante no encontrado",
         )
 
-    await require_deposito_access(user, estante.get("deposito_id"), db)
+    await require_deposito_role(
+        user, estante.get("deposito_id"), db, allowed_roles={"admin"}
+    )
 
     ubicaciones = await ubicacion_repository.list_ubicaciones_by_estante(db, estante_id)
     valid_ids = {u["id"] for u in ubicaciones}

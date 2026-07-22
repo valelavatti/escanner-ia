@@ -147,10 +147,17 @@
 			if ($sessionStore?.usuario.is_admin) {
 				depositos = await listDepositos();
 			} else if ($sessionStore) {
-				depositos = $sessionStore.depositos.map((d) => ({
-					id: d.deposito_id,
-					nombre: d.deposito_nombre
-				}));
+				// Depósito admins can only manage depósitos where their role is admin.
+				depositos = $sessionStore.depositos
+					.filter((d) => d.role === 'admin')
+					.map((d) => ({
+						id: d.deposito_id,
+						nombre: d.deposito_nombre
+					}));
+				// Preselect the only manageable depósito so the filter matches the list.
+				if (depositos.length === 1 && selectedDepositoId == null) {
+					selectedDepositoId = depositos[0].id;
+				}
 			}
 			if (depositos.length > 0 && createDepositoId == null) {
 				createDepositoId = depositos[0].id;
@@ -416,10 +423,18 @@
 
 	const activeUbicaciones = $derived(selectedUbicaciones.filter((u) => u.estado === 'activo'));
 	const isSueltoShelf = $derived(selectedEstante?.nombre === SYSTEM_SHELF_NAME);
+	// Edge case: a depósito admin without any admin-role depósito has nothing to manage.
+	const noAdminDepositos = $derived(
+		$sessionStore != null && !$sessionStore.usuario.is_admin && depositos.length === 0
+	);
 </script>
 
 <section class="estantes-page">
 	{#if view === 'list'}
+		{#if noAdminDepositos}
+			<h1>Estantes</h1>
+			<p class="empty">No tenés depósitos asignados como administrador.</p>
+		{:else}
 		<header class="page-header">
 			<h1>Estantes</h1>
 			<button
@@ -507,6 +522,7 @@
 					</li>
 				{/each}
 			</ul>
+		{/if}
 		{/if}
 	{/if}
 

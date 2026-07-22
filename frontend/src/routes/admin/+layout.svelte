@@ -12,17 +12,24 @@
 		{ path: '/admin/usuarios', label: 'Usuarios' }
 	];
 
+	const isEstanteAdmin = $derived(($sessionStore?.depositos ?? []).some((d) => d.role === 'admin'));
+	const canAccessAdmin = $derived(($sessionStore?.usuario.is_admin ?? false) || isEstanteAdmin);
+	// Global admins see every tab; depósito admins can only manage estantes.
+	const visibleTabs = $derived(
+		$sessionStore?.usuario.is_admin ? tabs : tabs.filter((t) => t.path === '/admin/estantes')
+	);
+
 	$effect(() => {
-		if ($sessionStore && !$sessionStore.usuario.is_admin) {
+		if ($sessionStore && !canAccessAdmin) {
 			goto('/');
 		}
 	});
 </script>
 
-{#if $sessionStore?.usuario.is_admin}
+{#if canAccessAdmin}
 	<div class="admin-layout">
 		<nav class="admin-nav" aria-label="Admin">
-			{#each tabs as tab}
+			{#each visibleTabs as tab}
 				<a
 					href={tab.path}
 					class="admin-nav__link"

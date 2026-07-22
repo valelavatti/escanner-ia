@@ -30,7 +30,7 @@
 
 	$effect(() => {
 		if ($sessionStore && !$sessionStore.usuario.is_admin) {
-			goto('/');
+			goto('/admin/estantes');
 		}
 	});
 
