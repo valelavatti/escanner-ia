@@ -771,3 +771,166 @@ async def export_movimientos_csv(
             ])
 
     return output.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# Slice 2a additions (Part B phase 1)
+# ---------------------------------------------------------------------------
+# Pure data-layer helpers for the two new ``movimientos.tipo`` literals
+# introduced by migration 016. Neither helper opens or commits a transaction —
+# the caller (the surgery in ``ubicacion_repository`` for
+# ``rescate_sin_ubicacion`` on Slice 2b, the ``backfill_orphans.py`` script
+# for ``salvage_cleanup`` on Slice 4, or a unit test) wraps the call inside a
+# single ``BEGIN IMMEDIATE`` / ``commit`` envelope per design R3.
+#
+# IMPORTANT ORDERING NOTE (for Slice 2b's surgery): call
+# :func:`create_movimiento_rescate_sin_ubicacion` BEFORE mutating
+# ``ubicaciones.stock_actual`` for the rescue (i.e. as the FIRST write in the
+# assign-tx after the bucket drain, BEFORE the ubicacion UPDATE). This matches
+# the existing convention in :func:`_create_movimiento_once` (which snapshots
+# ``stock_general_anterior`` via :func:`get_producto_stock_total` BEFORE any
+# ubicacion mutation — see lines 145-149) so the lazy stock_general snapshot
+# taken here reflects the pre-mutation stock_general state.
+#
+# Spec anchors: REQ-B-006 (rescate), REQ-D-002 + REQ-D-003 (salvage),
+# REQ-B-007, REQ-X-006.
+
+
+async def create_movimiento_rescate_sin_ubicacion(
+    db: aiosqlite.Connection,
+    producto_id: str,
+    ubicacion_id: int,
+    qty: int,
+    usuario_id: Optional[int] = None,
+) -> int:
+    """Record a ``rescate_sin_ubicacion`` movimiento: ``qty`` units rescued
+    FROM the sin-ubicacion bucket INTO ``ubicacion_id``.
+
+    Called from the assign-surgery (Slice 2b) when an assign flow drains > 0
+    units from :mod:`stock_sin_ubicacion_repository` into the assigned
+    location. The audit record captures the rescue as a separate movement so
+    the eventual Suelto policy is unchanged and the bucket-out movement is
+    traceable per-ubicacion.
+
+    Stock-general snapshots are computed lazily via
+    :func:`get_producto_stock_total`: the bucket is NOT counted in
+    stock_general (per the 3-stock concept documented at the top of
+    :mod:`stock_sin_ubicacion_repository`), so moving ``qty`` units OUT of the
+    bucket INTO a ubicacion INCREASES stock_general by exactly ``qty``:
+
+      * ``stock_general_anterior`` = product's current total stock
+        (SUM(ubicaciones.stock_actual) + Suelto movimiento sums). Caller must
+        call this helper BEFORE updating ``ubicaciones.stock_actual`` for the
+        rescue so the snapshot reflects the pre-mutation state.
+      * ``stock_general_nuevo``    = ``stock_general_anterior + qty``.
+
+    Per-ubicacion snapshots:
+      * ``stock_anterior`` = 0 (the assigned location's prior quantity is
+        captured by the matching ``asignacion`` / ``alta`` movimiento; this
+        row records the per-ubicacion rescue event as a 0 -> qty delta for
+        audit clarity).
+      * ``stock_nuevo``    = qty (the rescued units now reside at this
+        ubicacion).
+
+    ``usuario_id`` is nullable per migration 012, allowing callers without a
+    session (e.g. backfill-style batch scripts) to record audit rows.
+
+    Caller wraps in a ``BEGIN IMMEDIATE`` / ``commit`` envelope (design R3).
+    This function does NOT commit.
+
+    Args:
+        db: Configured aiosqlite connection inside an active transaction.
+        producto_id: SKU of the product whose bucket units are being rescued.
+        ubicacion_id: ID of the ubicacion receiving the rescued units.
+        qty: Units moved from bucket -> ubicacion (> 0; rescue rows with
+            qty == 0 are never written — the caller guards on ``drained > 0``
+            per task 2b.2).
+        usuario_id: Optional user id for audit attribution (NULL allowed).
+
+    Returns:
+        The new ``movimientos.id``.
+    """
+    stock_general_anterior = await get_producto_stock_total(db, producto_id)
+    stock_general_nuevo = stock_general_anterior + qty
+    cursor = await db.execute(
+        """
+        INSERT INTO movimientos (
+            usuario_id, producto_id, ubicacion_id, cantidad,
+            stock_anterior, stock_nuevo, tipo,
+            stock_general_anterior, stock_general_nuevo
+        )
+        VALUES (?, ?, ?, ?, ?, ?, 'rescate_sin_ubicacion', ?, ?)
+        """,
+        (
+            usuario_id,
+            producto_id,
+            ubicacion_id,
+            qty,
+            0,
+            qty,
+            stock_general_anterior,
+            stock_general_nuevo,
+        ),
+    )
+    return cursor.lastrowid
+
+
+async def create_movimiento_salvage_cleanup(
+    db: aiosqlite.Connection,
+    ubicacion_id: int,
+    qty: int,
+    usuario_id: Optional[int] = None,
+) -> int:
+    """Record a ``salvage_cleanup`` movimiento for ``qty`` orphan units at
+    ``ubicacion_id`` (``producto_id`` is intentionally NULL — see REQ-D-002).
+
+    Called by the one-shot ``backfill_orphans.py`` script (Slice 4) for each
+    orphan ubicacion (``ubicaciones.stock_actual > 0 AND producto_id IS
+    NULL``). The script zeroes ``ubicaciones.stock_actual`` in the same
+    ``BEGIN IMMEDIATE`` / ``commit`` envelope, so per-ubicacion snapshots on
+    this movimiento row describe the cleanup:
+
+      * ``stock_anterior`` = qty (the orphan ubicacion's prior
+        ``stock_actual``).
+      * ``stock_nuevo``    = 0 (the ubicacion is zeroed in the same tx).
+
+    Because the orphan has NO product (by definition), the
+    ``stock_general_anterior`` and ``stock_general_nuevo`` columns cannot be
+    computed from existing data — they are recorded as 0 / 0 (the orphan's
+    stock contributes nothing to any product's ``stock_general``, since no
+    product is linked to it).
+
+    The FK on ``movimientos.producto_id`` to ``productos(sku)`` accepts NULL
+    (per migration 001:82 — ``producto_id TEXT`` has no NOT NULL). SQLite's
+    CHECK on ``movimientos.tipo`` accepts ``'salvage_cleanup'`` ONLY after
+    migration 016 (this slice).
+
+    ``usuario_id`` is nullable per migration 012, allowing backfill scripts
+    without a user session to record audit rows.
+
+    Caller wraps in a ``BEGIN IMMEDIATE`` / ``commit`` envelope (design R3).
+    This function does NOT commit.
+
+    Args:
+        db: Configured aiosqlite connection inside an active transaction.
+        ubicacion_id: ID of the orphan ubicacion being cleaned up.
+        qty: Units being salvaged (must equal the ubicacion's stock_actual at
+            call time; the caller is expected to zero it in the same tx).
+        usuario_id: Optional user id for audit attribution (NULL allowed —
+            backfill typically has no live user session).
+
+    Returns:
+        The new ``movimientos.id``.
+    """
+    cursor = await db.execute(
+        """
+        INSERT INTO movimientos (
+            usuario_id, producto_id, ubicacion_id, cantidad,
+            stock_anterior, stock_nuevo, tipo,
+            stock_general_anterior, stock_general_nuevo
+        )
+        VALUES (?, NULL, ?, ?, ?, 0, 'salvage_cleanup', 0, 0)
+        """,
+        (usuario_id, ubicacion_id, qty, qty),
+    )
+    return cursor.lastrowid
