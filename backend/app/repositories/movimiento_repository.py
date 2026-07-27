@@ -169,6 +169,19 @@ async def _create_movimiento_once(
         )
 
         if is_reassignment:
+            # Slice 2b audit-mis-attribution fix (REQ-B-003 + B5): the
+            # desasignacion row is the OUTGOING product's audit record.
+            # Snapshot the OLD product's stock_general BEFORE any
+            # ubicacion mutation takes effect — the ``stock_general_anterior``
+            # captured at line 145 above is the NEW product's snapshot and was
+            # being used here incorrectly for the OLD product's audit row
+            # (the mis-attribution bug at the original lines 171-184).
+            old_producto_stock_general_anterior = await get_producto_stock_total(
+                db, old_producto_id
+            )
+            old_producto_stock_general_nuevo = (
+                old_producto_stock_general_anterior - ubicacion["stock_actual"]
+            )
             await db.execute(
                 """
                 INSERT INTO movimientos (usuario_id, producto_id, ubicacion_id,
@@ -179,7 +192,8 @@ async def _create_movimiento_once(
                 (
                     usuario_id, old_producto_id, ubicacion_id,
                     ubicacion["stock_actual"],
-                    stock_general_anterior, stock_general_anterior,
+                    old_producto_stock_general_anterior,
+                    old_producto_stock_general_nuevo,
                 ),
             )
 
@@ -932,5 +946,187 @@ async def create_movimiento_salvage_cleanup(
         VALUES (?, NULL, ?, ?, ?, 0, 'salvage_cleanup', 0, 0)
         """,
         (usuario_id, ubicacion_id, qty, qty),
+    )
+    return cursor.lastrowid
+
+
+# ---------------------------------------------------------------------------
+# Slice 2b additions (Part B phase 2 — explicit-snapshot helpers)
+# ---------------------------------------------------------------------------
+# Two more data-layer helpers added by Slice 2b. Both take EXPLICIT
+# ``stock_general_anterior`` / ``stock_general_nuevo`` snapshots computed by
+# the caller (the surgery in ``ubicacion_repository`` for the explicit unassign
+# and assign flows). Using explicit snapshots rather than the lazy
+# ``get_producto_stock_total`` call from inside the helper (as the rescue and
+# salvage helpers do) gives the caller exact control over what the audit row
+# records for each side of the movement — important when the caller performs
+# multiple writes in one ``BEGIN IMMEDIATE`` transaction (the ubicacion UPDATE,
+# the bucket UPSERT / drain, AND the movimiento INSERT) and the lazy read would
+# land at the wrong mid-tx moment.
+#
+# Neither helper opens or commits a transaction — the caller wraps both in the
+# single ``BEGIN IMMEDIATE`` / ``commit`` envelope per design R3.
+#
+# Spec anchors: REQ-B-003 (desasignacion audit-fix), REQ-B-008 (asignacion
+# remainder), REQ-X-006.
+
+
+async def create_movimiento_desasignacion(
+    db: aiosqlite.Connection,
+    producto_id: str,
+    ubicacion_id: int,
+    stock_anterior: int,
+    stock_general_anterior: int,
+    stock_general_nuevo: int,
+    usuario_id: Optional[int] = None,
+) -> int:
+    """Record a ``desasignacion`` movimiento with EXPLICIT stock-general
+    snapshots for the OUTGOING product (Slice 2b audit-fix path — REQ-B-003).
+
+    Called by :func:`ubicacion_repository.unassign_producto_from_ubicacion`
+    AFTER it has: (1) snapshotted the OUTGOING product's stock_general with
+    :func:`get_producto_stock_total`, (2) UPSERTed the freed qty into the
+    ``stock_sin_ubicacion`` bucket, and (3) zeroed ``ubicaciones.stock_actual``
+    + NULLed ``ubicaciones.producto_id`` for the freed cell — all inside the
+    same ``BEGIN IMMEDIATE`` / ``commit`` envelope.
+
+    Snapshot contract (REQ-B-003 + scenario B5):
+      * ``stock_general_anterior`` MUST be the OUTGOING product's
+        stock_general computed BEFORE the unassign mutation (``stock_general
+        = SUM(ubicaciones.stock_actual WHERE producto_id = OUTGOING) +
+        Suelto_sums``).
+      * ``stock_general_nuevo``   MUST reflect the OUTGOING product's
+        stock_general AFTER the unassign (``anterior - stock_anterior``,
+        because the freed qty moved INTO the bucket which is NOT counted in
+        stock_general per the 3-stock concept).
+
+    Per-row values (matches the historical ``desasignacion`` audit shape):
+      * ``cantidad = 0`` (this row records the UN-TAG event — no qty delta per
+        the row itself; the qty that left the ubicacion is captured by
+        ``stock_anterior`` below).
+      * ``stock_anterior`` = the ubicacion's prior ``stock_actual`` (caller-
+        supplied; = the qty now sitting in the bucket).
+      * ``stock_nuevo    = 0`` (REQ-B-001 zeroed the ubicacion).
+
+    ``usuario_id`` is nullable per migration 012.
+
+    Caller wraps in a ``BEGIN IMMEDIATE`` / ``commit`` envelope (design R3).
+    This function does NOT commit.
+
+    Args:
+        db: Configured aiosqlite connection inside an active transaction.
+        producto_id: SKU of the OUTGOING product being unassigned.
+        ubicacion_id: ID of the real freed ubicacion (NOT NULL — REQ-B-004).
+        stock_anterior: The ubicacion's prior ``stock_actual`` (= qty moved to
+            the bucket by the caller).
+        stock_general_anterior: OUTGOING product's stock_general BEFORE
+            unassign (caller's snapshot — REQ-B-003).
+        stock_general_nuevo: OUTGOING product's stock_general AFTER unassign
+            (= ``anterior - stock_anterior``).
+        usuario_id: Optional user id for audit attribution (NULL allowed).
+
+    Returns:
+        The new ``movimientos.id``.
+    """
+    cursor = await db.execute(
+        """
+        INSERT INTO movimientos (
+            usuario_id, producto_id, ubicacion_id, cantidad,
+            stock_anterior, stock_nuevo, tipo,
+            stock_general_anterior, stock_general_nuevo
+        )
+        VALUES (?, ?, ?, 0, ?, 0, 'desasignacion', ?, ?)
+        """,
+        (
+            usuario_id,
+            producto_id,
+            ubicacion_id,
+            stock_anterior,
+            stock_general_anterior,
+            stock_general_nuevo,
+        ),
+    )
+    return cursor.lastrowid
+
+
+async def create_movimiento_asignacion(
+    db: aiosqlite.Connection,
+    producto_id: str,
+    ubicacion_id: int,
+    qty: int,
+    stock_general_anterior: int,
+    stock_general_nuevo: int,
+    usuario_id: Optional[int] = None,
+) -> int:
+    """Record an ``asignacion`` movimiento for ``qty`` newly-counted units
+    with EXPLICIT stock-general snapshots (Slice 2b — REQ-B-008).
+
+    Called by :func:`ubicacion_repository.assign_producto_to_ubicacion` when
+    the user has entered a non-zero qty at the ubicacion AND the bucket was
+    not enough to cover it (``remainder > 0``). The caller computes:
+
+      * ``qty``                       = ``remainder = max(0, entered_qty - bucket)``.
+      * ``stock_general_anterior``    = stock_general AFTER the bucket-rescue
+        drained into the ubicacion but BEFORE the remainder qty takes
+        residence (``pre_assign_stock_general + drain_amount``).
+      * ``stock_general_nuevo``       = stock_general AFTER the remainder qty
+        takes residence (``anterior + remainder`` = ``pre_assign_stock_general
+        + entered_qty``).
+
+    The caller is responsible for ordering: it MUST call
+    :func:`create_movimiento_rescate_sin_ubicacion` (if ``drain_amount > 0``)
+    BEFORE calling this helper for the same product, so the rescue's lazy
+    snapshot captures the pre-rescue state. This helper then receives the
+    post-rescue ``anterior`` explicitly from the caller (the rescue helper's
+    lazy snapshot cannot be re-read after the rescue because ``get_producto_stock_total``
+    returns the same value — bucket is not counted; only ``ubicaciones.stock_actual``
+    counts, which the caller has not yet mutated).
+
+    Per-row values:
+      * ``cantidad = qty`` (the newly-counted units entering this cell —
+        REQ-B-008: NO asignacion row is written when remainder = 0).
+      * ``stock_anterior = 0`` (fresh count — the ubicacion's prior qty from
+        this asignacion's perspective is 0; the rescue qty already captured
+        by the matching ``rescate_sin_ubicacion`` row).
+      * ``stock_nuevo    = qty``.
+
+    ``usuario_id`` is nullable per migration 012.
+
+    Caller wraps in a ``BEGIN IMMEDIATE`` / ``commit`` envelope (design R3).
+    This function does NOT commit.
+
+    Args:
+        db: Configured aiosqlite connection inside an active transaction.
+        producto_id: SKU of the product being newly counted at this cell.
+        ubicacion_id: ID of the assigned ubicacion.
+        qty: Newly-counted remainder qty (``remainder = max(0,
+            entered_qty - bucket_qty)``; MUST be > 0 per REQ-B-008).
+        stock_general_anterior: Product's stock_general AFTER the rescue
+            drained into the ubicacion but BEFORE this remainder qty.
+        stock_general_nuevo: Product's stock_general AFTER this remainder qty
+        takes residence (= ``anterior + qty``).
+        usuario_id: Optional user id for audit attribution (NULL allowed).
+
+    Returns:
+        The new ``movimientos.id``.
+    """
+    cursor = await db.execute(
+        """
+        INSERT INTO movimientos (
+            usuario_id, producto_id, ubicacion_id, cantidad,
+            stock_anterior, stock_nuevo, tipo,
+            stock_general_anterior, stock_general_nuevo
+        )
+        VALUES (?, ?, ?, ?, 0, ?, 'asignacion', ?, ?)
+        """,
+        (
+            usuario_id,
+            producto_id,
+            ubicacion_id,
+            qty,
+            qty,
+            stock_general_anterior,
+            stock_general_nuevo,
+        ),
     )
     return cursor.lastrowid

@@ -10,6 +10,7 @@ from typing import Optional
 import aiosqlite
 
 from app.repositories import movimiento_repository as _mov_repo
+from app.repositories import stock_sin_ubicacion_repository as _bucket_repo
 
 
 class UbicacionOcupadaError(Exception):
@@ -263,14 +264,60 @@ async def assign_producto_to_ubicacion(
     ubicacion_id: int,
     producto_id: str,
     usuario_id: int,
+    *,
+    entered_qty: int = 0,
 ) -> bool:
-    """Assign a product SKU to an empty ubicacion.
+    """Assign a product SKU to an empty ubicacion and drain the
+    sin-ubicacion bucket FIRST (REQ-B-005, B-006, B-007, B-008, B-009,
+    B-010, R3).
+
+    Drain semantics (one ``BEGIN IMMEDIATE`` / ``commit`` atomic transaction
+    per design R3):
+
+      1. Load the ubicacion row → current ``producto_id`` and stock_actual
+         (typically 0 for a freshly-tagged empty cell).
+      2. If the ubicacion does not exist → ``False``.
+      3. If the ubicacion already has a DIFFERENT product assigned → raise
+         ``UbicacionOcupadaError`` (same guard as the pre-surgery version).
+      4. Compute:
+           ``drain_amount = min(bucket_qty, entered_qty)``
+           ``remainder    = max(0, entered_qty - bucket_qty)``
+      5. Inside ONE tx:
+         (a) If ``drain_amount > 0``: call
+             ``stock_sin_ubicacion_repository.drain(...)`` (R1 deletes the
+             row when cantidad reaches 0 — no zero-orphans).
+         (b) If ``drain_amount > 0``: call
+             ``movimiento_repository.create_movimiento_rescate_sin_ubicacion(...)``
+             BEFORE mutating ``ubicaciones.stock_actual`` — CRITICAL ORDERING
+             CONTRACT (the rescue helper lazily snapshots
+             ``stock_general_anterior`` via ``get_producto_stock_total``;
+             if the ubicacion were mutated first, the snapshot would land in
+             the post-mutation state — see the carry-forward from Slice 2a).
+         (c) UPDATE the ubicacion:
+             ``producto_id = producto_id``,
+             ``stock_actual = current_stock + drain_amount + remainder``
+             (additive — preserves any leftover from prior bug-driven
+             orphan state, per Tasks #297 step 6 note).
+         (d) If ``remainder > 0``: call
+             ``movimiento_repository.create_movimiento_asignacion(...)`` with
+             EXPLICIT snapshots (anterior = pre + drain; nuevo = pre + drain
+             + remainder = pre + entered_qty). NO ``asignacion`` row is
+             written when ``remainder == 0`` (REQ-B-008).
+
+    ``entered_qty`` is keyword-only (PEP 3102) with default ``0`` for
+    backward compat with the existing router caller at
+    ``app.api.v1.endpoints.ubicaciones.py`` which does NOT pass a qty (the
+    FE admin modal tags the ubicacion without entering a count). The bucket
+    drain only happens when an explicit qty is supplied; the router call
+    therefore keeps its historical "tag only" semantics modulo the audit
+    row — moving forward, a tag-only assign writes NO ``asignacion`` row
+    (per REQ-B-008, no row when remainder = 0).
 
     Raises:
         UbicacionOcupadaError: if the ubicacion already has a product assigned.
     """
     async with db.execute(
-        "SELECT producto_id FROM ubicaciones WHERE id = ?",
+        "SELECT producto_id, stock_actual FROM ubicaciones WHERE id = ?",
         (ubicacion_id,),
     ) as cursor:
         row = await cursor.fetchone()
@@ -281,29 +328,93 @@ async def assign_producto_to_ubicacion(
     if row["producto_id"] is not None:
         raise UbicacionOcupadaError("La ubicacion ya tiene un producto asignado")
 
-    await db.execute(
-        """
-        UPDATE ubicaciones
-        SET producto_id = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-        """,
-        (producto_id, ubicacion_id),
+    current_stock_actual = row["stock_actual"]
+
+    # Snapshot the product's stock_general BEFORE any mutation. The rescue
+    # helper will call ``get_producto_stock_total`` lazily inside the tx and
+    # get this exact same value (bucket is NOT counted in stock_general per
+    # the 3-stock concept, and the ubicaciones row has not been mutated yet).
+    # Captured once here so the explicit snapshots for the asignacion
+    # remainder row (step d) are deterministic without re-reading the lazy
+    # snapshot between the rescue and asignacion writes.
+    pre_assign_stock_general = await _mov_repo.get_producto_stock_total(
+        db, producto_id
     )
 
-    # Append-only audit record for the assignment (no stock change).
-    stock_general = await _mov_repo.get_producto_stock_total(db, producto_id)
-    await db.execute(
-        """
-        INSERT INTO movimientos
-            (usuario_id, producto_id, ubicacion_id, cantidad, stock_anterior, stock_nuevo, tipo,
-             stock_general_anterior, stock_general_nuevo)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (usuario_id, producto_id, ubicacion_id, 0, 0, 0, "asignacion",
-         stock_general, stock_general),
-    )
+    bucket_qty = await _bucket_repo.get_cantidad(db, producto_id)
+    drain_amount = min(bucket_qty, entered_qty)
+    remainder = max(0, entered_qty - bucket_qty)
 
-    await db.commit()
+    await db.execute("BEGIN IMMEDIATE")
+    try:
+        # (a) Drain the bucket FIRST. R1 deletes the row when cantidad
+        # reaches 0. The drain must happen BEFORE the rescue helper so the
+        # rescue's lazy ``get_producto_stock_total`` snapshot still sees the
+        # pre-rescue state — but the bucket is NOT counted in stock_general
+        # anyway, so the snapshot value would be the same before/after the
+        # drain. The ordering matters in step (b): the rescue helper MUST run
+        # BEFORE the ubicacion UPDATE.
+        if drain_amount > 0:
+            await _bucket_repo.drain(db, producto_id, drain_amount)
+
+        # (b) Rescue movimiento — MUST be called BEFORE mutating
+        # ``ubicaciones.stock_actual`` (carry-forward #1 from Slice 2a). The
+        # helper lazily snapshots ``stock_general_anterior`` and we want it
+        # to capture the pre-mutation state.
+        if drain_amount > 0:
+            await _mov_repo.create_movimiento_rescate_sin_ubicacion(
+                db,
+                producto_id=producto_id,
+                ubicacion_id=ubicacion_id,
+                qty=drain_amount,
+                usuario_id=usuario_id,
+            )
+
+        # (c) UPDATE the ubicacion: tag the product, set the new stock_actual
+        # = old + drain + remainder (= old + entered_qty when remainder =
+        # entered_qty - drain). The drain qty (rescued from bucket) AND the
+        # remainder (newly counted) both take physical residence at the cell.
+        new_stock_actual = current_stock_actual + drain_amount + remainder
+        await db.execute(
+            """
+            UPDATE ubicaciones
+            SET producto_id = ?,
+                stock_actual = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (producto_id, new_stock_actual, ubicacion_id),
+        )
+
+        # (d) Asignacion movimiento for the REMAINDER (newly-counted qty).
+        # REQ-B-008: NO asignacion row is written when remainder = 0.
+        # Explicit snapshots so the helper does NOT re-read stock_general
+        # (it would see the post-UPDATE state — wrong for the audit row's
+        # ``anterior``). anterior captures the state AFTER the rescue
+        # drained into the cell but BEFORE the remainder qty takes residence
+        # (= pre + drain); nuevo is the post-tx total (= pre + entered_qty).
+        if remainder > 0:
+            stock_general_anterior_asignacion = (
+                pre_assign_stock_general + drain_amount
+            )
+            stock_general_nuevo_asignacion = (
+                pre_assign_stock_general + drain_amount + remainder
+            )
+            await _mov_repo.create_movimiento_asignacion(
+                db,
+                producto_id=producto_id,
+                ubicacion_id=ubicacion_id,
+                qty=remainder,
+                stock_general_anterior=stock_general_anterior_asignacion,
+                stock_general_nuevo=stock_general_nuevo_asignacion,
+                usuario_id=usuario_id,
+            )
+
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+
     return True
 
 
@@ -312,10 +423,37 @@ async def unassign_producto_from_ubicacion(
     ubicacion_id: int,
     usuario_id: int,
 ) -> bool:
-    """Remove the product assignment from a ubicacion (set producto_id = NULL).
+    """Unassign the product from a ubicacion (REQ-B-001, B-002, B-003,
+    B-004, B-009, R3).
 
-    The ubicacion's stock_actual is NOT reset — it stays at whatever the last
-    movimiento left. If the user wants to zero it out, they scan and enter 0.
+    Replaces the historical "soft-clear" behavior (which left stock_actual
+    untouched and snapshotted the OLD product's stock_general AFTER the
+    producto_id=NULL UPDATE) with a real relocation:
+
+      1. Load the ubicacion row → get the OUTGOING ``producto_id`` and the
+         qty sitting at the cell (its ``stock_actual``).
+      2. If the ubicacion does not exist → ``False``.
+      3. If the ubicacion has no product assigned (``producto_id IS NULL``)
+         → no-op, return ``True`` (nothing to unassign).
+      4. Snapshot the OUTGOING product's stock_general BEFORE any mutation
+         (REQ-B-003 audit-fix + scenario B5 — the OLD product's snapshot,
+         NOT some NEW product's).
+      5. Inside ONE ``BEGIN IMMEDIATE`` / ``commit`` transaction:
+         (a) UPSERT the freed qty into the ``stock_sin_ubicacion`` bucket
+             via ``stock_sin_ubicacion_repository.upsert_add(...)`` — moves
+             qty into the bucket (REQ-B-002; qty == 0 is a no-op per R1,
+             no zero-row is ever created).
+         (b) UPDATE ``ubicaciones`` → ``producto_id = NULL,
+             stock_actual = 0`` (REQ-B-001 zero; the qty that was sitting
+             at the cell has just been moved to the bucket in (a) — both
+             writes in the same atomic tx).
+         (c) Write a ``desasignacion`` movimiento row via
+             ``movimiento_repository.create_movimiento_desasignacion(...)``
+             with the OUTGOING product's stock_general snapshots computed in
+             step 4 — the explicit audit-mis-attribution FIX (REQ-B-003 +
+             scenario B5; ``ubicacion_id`` is the real freed ubicacion,
+             NOT NULL — REQ-B-004).
+
     Returns True if the ubicacion existed, False otherwise.
     """
     async with db.execute(
@@ -330,30 +468,73 @@ async def unassign_producto_from_ubicacion(
     old_producto_id = row["producto_id"]
     stock_anterior = row["stock_actual"]
 
-    await db.execute(
-        """
-        UPDATE ubicaciones
-        SET producto_id = NULL, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-        """,
-        (ubicacion_id,),
-    )
+    # No product to unassign → no-op. Spec: "If producto_id_actual IS NULL
+    # → no-op (nothing to unassign). Return early." Return True (the ubicacion
+    # existed; matching the historical pre-surgery return semantics).
+    if old_producto_id is None:
+        return True
 
-    # Append-only audit record for the removal (stock conceptually reset to 0).
-    if old_producto_id is not None:
-        stock_general = await _mov_repo.get_producto_stock_total(db, old_producto_id)
+    # Step 4 — Snapshot the OUTGOING product's stock_general BEFORE any
+    # mutation (REQ-B-003 + scenario B5). Captured OUTSIDE the BEGIN
+    # IMMEDIATE block so a busy writer lock does not encapsulate the
+    # (cheap, readonly) snapshot; the value reflects
+    # SUM(ubicaciones.stock_actual WHERE producto_id = OUTGOING) + Suelto
+    # sums at the unassign moment, INCLUDING the qty at the target
+    # ubicacion itself (because we have not yet zeroed the cell).
+    stock_general_anterior = await _mov_repo.get_producto_stock_total(
+        db, old_producto_id
+    )
+    # The bucket is NOT counted in stock_general (3-stock concept). Moving
+    # qty from the ubicacion INTO the bucket therefore DECREASES the OLD
+    # product's stock_general by exactly ``stock_anterior``.
+    stock_general_nuevo = stock_general_anterior - stock_anterior
+
+    # Step 5 — Atomic surgery: bucket UPSERT + ubicacion zero + audit row,
+    # all in ONE ``BEGIN IMMEDIATE`` / ``commit`` tx (design R3).
+    await db.execute("BEGIN IMMEDIATE")
+    try:
+        # (a) Move the freed qty into the bucket. R1 enforces DELETE-on-zero;
+        # ``upsert_add`` with qty == 0 is a no-op (no zero-row is created).
+        await _bucket_repo.upsert_add(db, old_producto_id, stock_anterior)
+
+        # (b) Zero the cell + clear the product assignment (REQ-B-001 +
+        # REQ-B-002). The qty has just been moved into the bucket in (a)
+        # so the SQL-level invariant ``ubicaciones.stock_actual = 0`` for
+        # the freed cell is consistent with the bucket gain of the same qty.
         await db.execute(
             """
-            INSERT INTO movimientos
-                (usuario_id, producto_id, ubicacion_id, cantidad, stock_anterior, stock_nuevo, tipo,
-                 stock_general_anterior, stock_general_nuevo)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            UPDATE ubicaciones
+            SET producto_id = NULL,
+                stock_actual = 0,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
             """,
-            (usuario_id, old_producto_id, ubicacion_id, 0, stock_anterior, 0, "desasignacion",
-             stock_general, stock_general),
+            (ubicacion_id,),
         )
 
-    await db.commit()
+        # (c) Audit row with EXPLICIT snapshots (the mis-attribution fix —
+        # REQ-B-003). The helper takes the OLD product's pre-unassign
+        # (anterior) and post-unassign (nuevo = anterior - qty)
+        # stock_general verbatim from the caller; it does NOT re-read
+        # lazily (which would now see the post-UPDATE state — the OLD
+        # product's stock_general decremented by ``stock_anterior`` — and
+        # record anterior == nuevo == post-state, defeating the audit row's
+        # purpose).
+        await _mov_repo.create_movimiento_desasignacion(
+            db,
+            producto_id=old_producto_id,
+            ubicacion_id=ubicacion_id,
+            stock_anterior=stock_anterior,
+            stock_general_anterior=stock_general_anterior,
+            stock_general_nuevo=stock_general_nuevo,
+            usuario_id=usuario_id,
+        )
+
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+
     return True
 
 
