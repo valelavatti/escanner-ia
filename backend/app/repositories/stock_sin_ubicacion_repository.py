@@ -193,3 +193,42 @@ async def delete_if_zero(db: aiosqlite.Connection, producto_id: str) -> None:
         """,
         (producto_id,),
     )
+
+
+async def list_all_with_producto(db: aiosqlite.Connection) -> list[dict]:
+    """Return every row in ``stock_sin_ubicacion`` joined with its ``productos``
+    row, ordered by ``updated_at DESC`` (most recently moved to the bucket
+    first) then ``producto_sku ASC`` as a stable tiebreaker.
+
+    R1 invariant guarantees every row returned has ``cantidad > 0`` (no
+    zero-orphans), so there is no need for a ``WHERE cantidad > 0`` filter
+    here — kept defensively inline for clarity.
+
+    Returns a list of dicts, one per bucket row:
+      * ``producto_sku``        — bucket row's ``producto_id`` (= productos.sku).
+      * ``producto_descripcion``— joined from ``productos.descripcion``; may be
+        ``""`` (empty string) if a product was deleted without cascading — the
+        ``stock_sin_ubicacion`` table has ``ON DELETE CASCADE`` on the FK
+        (migration 015:1), so orphan rows cannot happen in practice, but the
+        ``LEFT JOIN`` keeps the endpoint robust if a future writer bypasses
+        FK enforcement.
+      * ``cantidad``           — bucket qty.
+      * ``updated_at``         — last bucket-modified timestamp.
+
+    Spec anchor: Slice 6 admin ``GET /productos/sin-ubicacion`` (Point 5).
+    """
+    async with db.execute(
+        """
+        SELECT
+            s.producto_id AS producto_sku,
+            COALESCE(p.descripcion, '') AS producto_descripcion,
+            s.cantidad AS cantidad,
+            s.updated_at AS updated_at
+          FROM stock_sin_ubicacion s
+          LEFT JOIN productos p ON p.sku = s.producto_id
+         WHERE s.cantidad > 0
+         ORDER BY s.updated_at DESC, s.producto_id ASC
+        """,
+    ) as cursor:
+        rows = await cursor.fetchall()
+    return [dict(r) for r in rows]

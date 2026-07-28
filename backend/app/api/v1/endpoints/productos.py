@@ -3,15 +3,22 @@
 import aiosqlite
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.api.v1.deps import get_current_user, get_deposito_ids_for_user
+from app.api.v1.deps import get_current_user, get_deposito_ids_for_user, require_admin
 from app.core.database import get_db
-from app.repositories import movimiento_repository, producto_repository, ubicacion_repository
+from app.repositories import (
+    movimiento_repository,
+    producto_repository,
+    stock_sin_ubicacion_repository,
+    ubicacion_repository,
+)
 from app.schemas.auth import UsuarioResponse
 from app.schemas.productos import (
     ProductOut,
     ProductSearchResponse,
+    ProductoStockTotal,
     ProductoUbicacionesResponse,
     ProductoUbicacionItem,
+    StockSinUbicacionListItem,
     UbicacionStockInfo,
 )
 
@@ -50,17 +57,67 @@ async def list_productos(
     return ProductSearchResponse(items=items, total=len(items))
 
 
-@router.get("/{codigo_de_barra}/stock-total", response_model=dict)
+@router.get("/sin-ubicacion", response_model=list[StockSinUbicacionListItem])
+async def list_stock_sin_ubicacion(
+    db: aiosqlite.Connection = Depends(get_db),
+    user: UsuarioResponse = Depends(require_admin),
+):
+    """List every product with units in the sin-ubicacion bucket (admin only).
+
+    Returns one row per non-empty bucket entry, joining ``stock_sin_ubicacion``
+    with ``productos`` on SKU. Each row pairs the bucket qty (``cantidad``)
+    with the product SKU + description so admins can see what units are
+    floating without a physical home (Slice 6 / Frontend Point 5).
+
+    The bucket stays GLOBAL per product (no ``deposito_id``); per-deposito
+    split is deferred to future multi-deposito work (user decision in this
+    slice). Read-only — admin actions on the bucket are out of scope.
+
+    Registered BEFORE ``/{codigo_de_barra}`` routes so FastAPI's path matcher
+    resolves the literal segment ``sin-ubicacion`` here instead of binding it
+    as a ``codigo_de_barra`` value (which would 404 on product lookup).
+    """
+    rows = await stock_sin_ubicacion_repository.list_all_with_producto(db)
+    return [
+        StockSinUbicacionListItem(
+            producto_sku=row["producto_sku"],
+            producto_descripcion=row["producto_descripcion"],
+            cantidad=row["cantidad"],
+            updated_at=row.get("updated_at"),
+        )
+        for row in rows
+    ]
+
+
+@router.get("/{codigo_de_barra}/stock-total", response_model=ProductoStockTotal)
 async def get_producto_stock_total(
     codigo_de_barra: str,
     sku: str = Query(None, description="SKU del producto (si ya se conoce)"),
     db: aiosqlite.Connection = Depends(get_db),
     user: UsuarioResponse = Depends(get_current_user),
 ):
-    """Return the total stock of a product across all ubicaciones."""
+    """Return the total stock of a product broken down into physical + bucket.
+
+    Per spec REQ-X-002 + REQ-B-009, the displayed ``stock_total`` (the
+    "stock general" the user sees) is the sum of physical ubicaciones stock
+    (incl. Suelto movimiento sums) PLUS the ``stock_sin_ubicacion`` bucket
+    qty for the product. The ``stock_sin_ubicacion`` field surfaces the
+    bucket qty separately so the frontend can render the 3-stock breakdown
+    without a second round-trip (Slice 6 / Frontend Point 4).
+
+    ``movimiento_repository.get_producto_stock_total`` returns physical +
+    Suelto only (the bucket is a separate flow); this endpoint ADDS the
+    bucket qty here so the ``stock_total`` invariant (REQ-B-009) holds at
+    the API boundary.
+    """
     if sku:
-        total = await movimiento_repository.get_producto_stock_total(db, sku)
-        return {"sku": sku, "stock_total": total}
+        physical = await movimiento_repository.get_producto_stock_total(db, sku)
+        bucket = await stock_sin_ubicacion_repository.get_cantidad(db, sku)
+        return ProductoStockTotal(
+            sku=sku,
+            stock_total=physical + bucket,
+            stock_sin_ubicacion=bucket,
+        )
 
     row = await producto_repository.get_producto_by_codigo(db, codigo_de_barra)
     if row is None:
@@ -68,8 +125,13 @@ async def get_producto_stock_total(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Producto no encontrado",
         )
-    total = await movimiento_repository.get_producto_stock_total(db, row["sku"])
-    return {"sku": row["sku"], "stock_total": total}
+    physical = await movimiento_repository.get_producto_stock_total(db, row["sku"])
+    bucket = await stock_sin_ubicacion_repository.get_cantidad(db, row["sku"])
+    return ProductoStockTotal(
+        sku=row["sku"],
+        stock_total=physical + bucket,
+        stock_sin_ubicacion=bucket,
+    )
 
 
 @router.get("/{codigo_de_barra}/ubicaciones", response_model=ProductoUbicacionesResponse)

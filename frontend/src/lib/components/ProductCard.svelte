@@ -5,6 +5,7 @@
 	interface Props {
 		product: ProductWithUbicacionStock;
 		stockTotal: number;
+		bucketQty?: number;
 		quantity: number;
 		mode: 'alta' | 'ajuste';
 		isSaving: boolean;
@@ -17,6 +18,7 @@
 	let {
 		product,
 		stockTotal,
+		bucketQty = 0,
 		quantity,
 		mode,
 		isSaving,
@@ -65,7 +67,7 @@
 			{#if (existingProductoStock ?? 0) > 0}
 				⚠️ Esta ubicación ya tiene otro producto: <strong>{existingProductoSku}</strong>
 				con <strong>{existingProductoStock}</strong> unidades. Al guardar, esas unidades se
-				eliminarán del stock de <strong>{existingProductoSku}</strong> y esta ubicación
+				reasignarán a 'Sin ubicación' (se conservan en el producto) y esta ubicación
 				arrancará desde 0 con el nuevo producto.
 			{:else}
 				⚠️ Esta ubicación ya tiene otro producto: <strong>{existingProductoSku}</strong>.
@@ -78,8 +80,8 @@
 		<label class="product-card__confirm">
 			<input type="checkbox" bind:checked={confirmReassign} />
 			<span>
-				Entiendo que se eliminarán {existingProductoStock} unidades del stock de
-				{existingProductoSku}
+				Entiendo que se moverán {existingProductoStock} unidades de
+				{existingProductoSku} a 'Sin ubicación'
 			</span>
 		</label>
 	{/if}
@@ -87,6 +89,12 @@
 	<div class="product-card__stock" class:product-card__stock--new={!isAssigned}>
 		Stock actual: {currentStock}
 	</div>
+
+	{#if bucketQty > 0}
+		<div class="product-card__stock product-card__stock--sin-ubicacion">
+			Sin ubicación: {bucketQty} unidades
+		</div>
+	{/if}
 
 	{#if showStockGeneral}
 		<div class="product-card__stock product-card__stock--general">
@@ -175,6 +183,17 @@
 	.product-card__stock--general {
 		color: #4b5563;
 		background-color: #f3f4f6;
+	}
+
+	/* Sin-ubicacion bucket row (slice 6 / FE Point 2): renders alongside the
+	   other stock rows whenever the scanned product has units in the bucket.
+	   Uses the same dashed amber palette as ProductLocationsCard's
+	   ``location-row--sin-ubicacion`` so the "stock exists but has no physical
+	   home yet" visual language is consistent across the scanner UX. */
+	.product-card__stock--sin-ubicacion {
+		color: #b45309;
+		background-color: #fffbeb;
+		border: 2px dashed #f59e0b;
 	}
 
 	.product-card__warning {

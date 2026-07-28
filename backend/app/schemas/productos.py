@@ -71,3 +71,47 @@ class ProductoUbicacionesResponse(BaseModel):
     codigo_de_barra: str
     stock_total: int
     ubicaciones: list[ProductoUbicacionItem]
+
+
+class ProductoStockTotal(BaseModel):
+    """Response model for ``GET /productos/{codigo_de_barra}/stock-total``.
+
+    Exposes the 3-stock breakdown surfaced to the user (REQ-X-002):
+      * ``stock_total``         — spec-compliant ``stock_general`` per
+        REQ-X-002: SUM(ubicaciones.stock_actual WHERE producto_id=sku) +
+        Suelto movimiento sums + ``stock_sin_ubicacion.cantidad`` for the
+        product. This is the "total stock for this product" the user sees.
+      * ``stock_sin_ubicacion`` — the bucket qty in
+        ``stock_sin_ubicacion`` for this product (the units that have no
+        physical home yet). The ``stock_total`` field already includes
+        this qty; surfacing it separately lets the FE render the 3-stock
+        breakdown (REQ-X-002) without a second round-trip.
+
+    Slice 6 (FE exposes bucket): the field ``stock_sin_ubicacion`` was
+    added so the scanner ``ProductCard`` and the admin ``sin-ubicacion``
+    view can surface the bucket qty alongside physical stock (instead of
+    lumping bucket into ``stock_total`` opaquely). The bucket stays GLOBAL
+    per product (no ``deposito_id``); per-deposito split deferred to
+    future multi-deposito work (user decision).
+    """
+
+    sku: str
+    stock_total: int
+    stock_sin_ubicacion: int = 0
+
+
+class StockSinUbicacionListItem(BaseModel):
+    """One row in the ``GET /productos/sin-ubicacion`` admin listing.
+
+    Each row pairs a bucket qty (``stock_sin_ubicacion.cantidad``) with
+    the product it belongs to (joined on ``productos.sku``). The list is
+    view-only — admin actions on the bucket are out of scope (per design
+    §8 "NO separate admin UI for `stock_sin_ubicacion`" was the ORIGINAL
+    scope; Slice 6 introduces a READ-ONLY listing per user follow-up so
+    admins can see what units are floating without a physical home).
+    """
+
+    producto_sku: str
+    producto_descripcion: str
+    cantidad: int
+    updated_at: Optional[datetime] = None

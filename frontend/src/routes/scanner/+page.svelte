@@ -42,6 +42,7 @@
 	let lastScan = $state<LastScan | null>(null);
 	let scannedProduct = $state<ProductWithUbicacionStock | null>(null);
 	let stockTotal = $state(0);
+let bucketQty = $state(0);
 
 	let lastScannedCode = $state('');
 	let lastScannedTime = $state(0);
@@ -135,8 +136,10 @@
 			try {
 				const stockInfo = await getProductoStockTotal(product.sku);
 				stockTotal = stockInfo.stock_total;
+				bucketQty = stockInfo.stock_sin_ubicacion ?? 0;
 			} catch {
 				stockTotal = 0;
+				bucketQty = 0;
 			}
 		} catch (err) {
 			showError(`Error al cargar producto: ${barcode}`);
@@ -258,8 +261,10 @@
 			try {
 				const stockInfo = await getProductoStockTotal(product.sku);
 				stockTotal = stockInfo.stock_total;
+				bucketQty = stockInfo.stock_sin_ubicacion ?? 0;
 			} catch {
 				stockTotal = 0;
+				bucketQty = 0;
 			}
 
 			showGreenFlash(`Producto: ${product.sku} — ${product.descripcion?.substring(0, 40) ?? ''}`);
@@ -273,6 +278,7 @@
 	function clearScannedProduct() {
 		scannedProduct = null;
 		stockTotal = 0;
+		bucketQty = 0;
 		quantity = 0;
 		mode = 'alta';
 	}
@@ -586,6 +592,7 @@
 		<ProductCard
 			product={scannedProduct}
 			{stockTotal}
+			{bucketQty}
 			{quantity}
 			{mode}
 			{isSaving}

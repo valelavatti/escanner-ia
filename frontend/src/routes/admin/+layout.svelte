@@ -9,7 +9,8 @@
 		{ path: '/admin/import', label: 'Importar' },
 		{ path: '/admin/estantes', label: 'Estantes' },
 		{ path: '/admin/depositos', label: 'Depósitos' },
-		{ path: '/admin/usuarios', label: 'Usuarios' }
+		{ path: '/admin/usuarios', label: 'Usuarios' },
+		{ path: '/admin/sin-ubicacion', label: 'Sin ubicación' }
 	];
 
 	const isEstanteAdmin = $derived(($sessionStore?.depositos ?? []).some((d) => d.role === 'admin'));

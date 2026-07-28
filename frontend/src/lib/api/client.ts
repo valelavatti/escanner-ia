@@ -299,6 +299,17 @@ export interface ProductWithUbicacionStock extends Product {
 export interface ProductoStockTotal {
 	sku: string;
 	stock_total: number;
+	stock_sin_ubicacion: number;
+}
+
+// Admin listing of products whose units sit in the sin-ubicacion bucket
+// (Slice 6 / FE Point 5). Read-only — there are no admin actions on the
+// bucket; it only exits via re-assigning to a physical ubicacion.
+export interface StockSinUbicacionListItem {
+	producto_sku: string;
+	producto_descripcion: string;
+	cantidad: number;
+	updated_at: string | null;
 }
 
 export interface ProductoUbicacionItem {
@@ -474,6 +485,14 @@ export async function getProductoStockTotal(sku: string): Promise<ProductoStockT
 	return api<ProductoStockTotal>(
 		`/productos/${encodeURIComponent(sku)}/stock-total?sku=${encodeURIComponent(sku)}`
 	);
+}
+
+// Admin-only listing of every product with units in the sin-ubicacion bucket
+// (Slice 6 / FE Point 5 — backend ``GET /productos/sin-ubicacion`` guarded
+// by ``require_admin``). Each row pairs a bucket qty with the product SKU +
+// description joined server-side.
+export async function getStockSinUbicacion(): Promise<StockSinUbicacionListItem[]> {
+	return api<StockSinUbicacionListItem[]>('/productos/sin-ubicacion');
 }
 
 export async function getProductoUbicaciones(
