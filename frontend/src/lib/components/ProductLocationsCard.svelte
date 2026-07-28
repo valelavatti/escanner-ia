@@ -42,26 +42,40 @@
 		<ul class="locations-card__list" role="list">
 			{#each locations as loc (loc.ubicacion_id)}
 				<li>
-					<button
-						type="button"
-						class="location-row"
-						class:location-row--zero={loc.stock === 0}
-						onclick={() => onSelectLocation(loc)}
-					>
-						<span class="location-row__main">
-							<span class="location-row__estante">{loc.estante_nombre}</span>
-							{#if loc.estante_nombre === 'Suelto'}
-								<span class="location-row__pill">Suelto</span>
-							{:else}
-								<span class="location-row__tag">F{loc.fila_label}-C{loc.columna_label}</span>
-							{/if}
-							<span class="location-row__qr">{loc.qr_valor}</span>
-							<span class="location-row__deposito">{loc.deposito_nombre}</span>
-						</span>
-						<span class="location-row__stock" class:location-row__stock--zero={loc.stock === 0}>
-							{loc.stock}
-						</span>
-					</button>
+					{#if loc.ubicacion_id === null}
+						<div
+							class="location-row location-row--sin-ubicacion"
+							role="status"
+							aria-label="Sin ubicación física"
+						>
+							<span class="location-row__sin-ubicacion-banner">Sin ubicación física</span>
+							<span class="location-row__main">
+								<span class="location-row__estante">{loc.estante_nombre}</span>
+							</span>
+							<span class="location-row__stock">{loc.stock}</span>
+						</div>
+					{:else}
+						<button
+							type="button"
+							class="location-row"
+							class:location-row--zero={loc.stock === 0}
+							onclick={() => onSelectLocation(loc)}
+						>
+							<span class="location-row__main">
+								<span class="location-row__estante">{loc.estante_nombre}</span>
+								{#if loc.estante_nombre === 'Suelto'}
+									<span class="location-row__pill">Suelto</span>
+								{:else}
+									<span class="location-row__tag">F{loc.fila_label}-C{loc.columna_label}</span>
+								{/if}
+								<span class="location-row__qr">{loc.qr_valor}</span>
+								<span class="location-row__deposito">{loc.deposito_nombre}</span>
+							</span>
+							<span class="location-row__stock" class:location-row__stock--zero={loc.stock === 0}>
+								{loc.stock}
+							</span>
+						</button>
+					{/if}
 				</li>
 			{/each}
 		</ul>
@@ -226,6 +240,49 @@
 
 	.location-row__stock--zero {
 		color: #94a3b8;
+	}
+
+	/* Sin-ubicacion bucket row (REQ-C-004..006): visible alongside physical
+	   ubicaciones in the same list, visually distinguished by a dashed
+	   border + amber palette so users immediately see "stock exists but has
+	   no physical home yet". No QR/print/map affordances — the bucket is a
+	   transit state, not a scannable shelf (design §4 + R5). */
+	.location-row--sin-ubicacion {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.75rem;
+		width: 100%;
+		min-height: 3rem;
+		padding: 0.75rem 1rem;
+		font-size: 1rem;
+		text-align: left;
+		color: #0f172a;
+		background-color: #fffbeb;
+		border: 2px dashed #f59e0b;
+		border-radius: 0.5rem;
+		cursor: default;
+	}
+
+	.location-row__sin-ubicacion-banner {
+		flex-shrink: 0;
+		align-self: flex-start;
+		padding: 0.125rem 0.5rem;
+		font-size: 0.75rem;
+		font-weight: 700;
+		text-transform: uppercase;
+		letter-spacing: 0.025em;
+		color: #92400e;
+		background-color: #fef3c7;
+		border-radius: 0.25rem;
+	}
+
+	.location-row--sin-ubicacion .location-row__estante {
+		color: #b45309;
+	}
+
+	.location-row--sin-ubicacion .location-row__stock {
+		color: #b45309;
 	}
 
 	.locations-card__empty {

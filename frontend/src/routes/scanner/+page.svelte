@@ -332,6 +332,19 @@
 	}
 
 	async function handleSelectLocation(loc: ProductoUbicacionItem) {
+		// Slice 3 integration guard: sin-ubicacion bucket rows
+		// (``ubicacion_id === null``) render in ``ProductLocationsCard`` as a
+		// non-clickable ``<div>`` (no ``onclick``), so this handler is never
+		// invoked for them at runtime — but TS can't see that across the
+		// prop boundary. The early return narrows the spec-mandated
+		// ``ProductoUbicacionItem.ubicacion_id: number | null`` widening
+		// (REQ-C-003, design §4) so the strict ``AnchoredLocation`` cast
+		// below stays type-safe without widening ``AnchoredLocation``
+		// itself (which would cascade into ``getProductoByBarcodeWithStock``
+		// and ``createMovimiento``).
+		if (loc.ubicacion_id === null || loc.qr_valor === null) {
+			return;
+		}
 		// Anchor the chosen location — same shape as selectUbicacion / handleSectorScan.
 		const anchored: AnchoredLocation = {
 			ubicacion_id: loc.ubicacion_id,

@@ -39,11 +39,22 @@ class ProductSearchResponse(BaseModel):
 
 
 class ProductoUbicacionItem(BaseModel):
-    """One ubicacion where a product has stock."""
+    """One ubicacion where a product has stock.
 
-    ubicacion_id: int
+    ``ubicacion_id`` and ``qr_valor`` are Optional to support the synthetic
+    sin-ubicacion bucket row (REQ-C-001, REQ-C-002, REQ-C-003): a product
+    whose freed units live in the ``stock_sin_ubicacion`` bucket surfaces
+    as a row with ``ubicacion_id = None``, ``qr_valor = None`` and
+    ``estante_nombre = "SIN UBICACION"`` alongside its physical ubicaciones.
+    The frontend renders the bucket row via the
+    ``item.ubicacion_id === null`` discriminator (REQ-C-004..006). Physical
+    ubicaciones (including Suelto, a real ``ubicaciones`` row with id=1)
+    always carry non-null ``ubicacion_id`` and ``qr_valor`` (REQ-C-007, R5).
+    """
+
+    ubicacion_id: Optional[int] = None
     estante_nombre: str
-    qr_valor: str
+    qr_valor: Optional[str] = None
     fila: int
     columna: int
     fila_label: str

@@ -302,9 +302,9 @@ export interface ProductoStockTotal {
 }
 
 export interface ProductoUbicacionItem {
-	ubicacion_id: number;
+	ubicacion_id: number | null;
 	estante_nombre: string;
-	qr_valor: string;
+	qr_valor: string | null;
 	fila: number;
 	columna: number;
 	fila_label: string;

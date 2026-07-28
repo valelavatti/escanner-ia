@@ -565,7 +565,50 @@ async def get_producto_ubicaciones(
         rows = await cursor.fetchall()
         suelto_rows = [dict(row) for row in rows]
 
-    return regular_rows + suelto_rows
+    # 3. Sin-ubicacion bucket — one synthetic row per ``stock_sin_ubicacion``
+    # row for this product (R1 invariant: a row in the bucket table ALWAYS
+    # means "there is bucket stock for this product", so no extra
+    # ``cantidad > 0`` filter is needed — kept defensively in case a future
+    # writer bypasses ``stock_sin_ubicacion_repository.drain``'s R1 cleanup).
+    # ``ubicacion_id`` and ``qr_valor`` are NULL so the frontend can
+    # discriminate the bucket row from a physical ubicacion via the
+    # ``item.ubicacion_id === null`` predicate (REQ-C-004..006).
+    #
+    # No deposito filtering: the bucket is a per-PRODUCT concept (one row per
+    # ``producto_id``, no per-deposito breakdown), so any user who can see the
+    # product sees its bucket qty regardless of deposito permissions.
+    # Branch order: physical (regular + Suelto) first, sin-ubicacion last
+    # (design §3 + R5 — FE renders physical locations before the synthetic
+    # bucket row).
+    bucket_sql = """
+        SELECT
+            NULL AS ubicacion_id,
+            'SIN UBICACION' AS estante_nombre,
+            NULL AS qr_valor,
+            0 AS fila,
+            0 AS columna,
+            s.cantidad AS stock,
+            NULL AS deposito_id,
+            '' AS deposito_nombre,
+            NULL AS estante_filas,
+            NULL AS estante_columnas,
+            NULL AS fila_order,
+            NULL AS columna_order,
+            NULL AS fila_format,
+            NULL AS columna_format,
+            'sin-ubicacion' AS source
+        FROM stock_sin_ubicacion s
+        WHERE s.producto_id = ?
+          AND s.cantidad > 0
+    """
+    bucket_params: list = [producto_sku]
+
+    bucket_rows: list[dict] = []
+    async with db.execute(bucket_sql, tuple(bucket_params)) as cursor:
+        rows = await cursor.fetchall()
+        bucket_rows = [dict(row) for row in rows]
+
+    return regular_rows + suelto_rows + bucket_rows
 
 
 async def list_movimientos(
