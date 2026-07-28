@@ -269,20 +269,30 @@ async def assign_producto_to_ubicacion(
 ) -> bool:
     """Assign a product SKU to an empty ubicacion and drain the
     sin-ubicacion bucket FIRST (REQ-B-005, B-006, B-007, B-008, B-009,
-    B-010, R3).
+    B-010, R3). Closes the B6 assign-overwrite edge case (Slice 6):
+    re-using the existing ``unassign_producto_from_ubicacion`` flow when
+    the cell is already occupied by a DIFFERENT product.
 
     Drain semantics (one ``BEGIN IMMEDIATE`` / ``commit`` atomic transaction
     per design R3):
 
       1. Load the ubicacion row → current ``producto_id`` and stock_actual
-         (typically 0 for a freshly-tagged empty cell).
+         (typically 0 for a freshly-tagged empty cell, or — for the B6
+         edge case — the previous occupant's leftover qty).
       2. If the ubicacion does not exist → ``False``.
-      3. If the ubicacion already has a DIFFERENT product assigned → raise
-         ``UbicacionOcupadaError`` (same guard as the pre-surgery version).
-      4. Compute:
+      3. If the ubicacion already holds a DIFFERENT product (B6 edge case):
+         FIRST call ``unassign_producto_from_ubicacion(ubicacion_id)`` so
+         the previous product's leftover stock is moved into ITS bucket
+         with a proper ``desasignacion`` audit row (instead of silently
+         reattributing the previous occupant's units to the new product).
+         Then re-read the now-empty cell and continue the assign flow.
+      4. If the ubicacion already holds the SAME product → raise
+         ``UbicacionOcupadaError`` (preserves the historical tag-only guard
+         so the FE admin modal can detect "nothing to do" at the cell).
+      5. Compute:
            ``drain_amount = min(bucket_qty, entered_qty)``
            ``remainder    = max(0, entered_qty - bucket_qty)``
-      5. Inside ONE tx:
+      6. Inside ONE tx:
          (a) If ``drain_amount > 0``: call
              ``stock_sin_ubicacion_repository.drain(...)`` (R1 deletes the
              row when cantidad reaches 0 — no zero-orphans).
@@ -296,8 +306,9 @@ async def assign_producto_to_ubicacion(
          (c) UPDATE the ubicacion:
              ``producto_id = producto_id``,
              ``stock_actual = current_stock + drain_amount + remainder``
-             (additive — preserves any leftover from prior bug-driven
-             orphan state, per Tasks #297 step 6 note).
+             (additive — after the B6 path ``current_stock`` is 0 because
+             the unassign step zeroed the cell; in the fresh-cell path it
+             is typically 0 anyway, but additive-on-0 is identity).
          (d) If ``remainder > 0``: call
              ``movimiento_repository.create_movimiento_asignacion(...)`` with
              EXPLICIT snapshots (anterior = pre + drain; nuevo = pre + drain
@@ -314,7 +325,8 @@ async def assign_producto_to_ubicacion(
     (per REQ-B-008, no row when remainder = 0).
 
     Raises:
-        UbicacionOcupadaError: if the ubicacion already has a product assigned.
+        UbicacionOcupadaError: if the ubicacion already has the SAME product
+            assigned (the historical tag-only guard — no rewrite needed).
     """
     async with db.execute(
         "SELECT producto_id, stock_actual FROM ubicaciones WHERE id = ?",
@@ -325,10 +337,40 @@ async def assign_producto_to_ubicacion(
     if row is None:
         return False
 
-    if row["producto_id"] is not None:
-        raise UbicacionOcupadaError("La ubicacion ya tiene un producto asignado")
+    previous_producto_id = row["producto_id"]
 
-    current_stock_actual = row["stock_actual"]
+    # B6 edge case (Slice 6 — assign-overwrite): if the cell currently
+    # holds a DIFFERENT product with possibly non-zero leftover stock,
+    # delegate the "previous occupant cleanup" to the existing
+    # ``unassign_producto_from_ubicacion`` surgery (the Slice 2b flow
+    # that moves its qty into ITS bucket with a proper ``desasignacion``
+    # audit row) BEFORE assigning the new product. This reuses the audit +
+    # bucket mechanism verbatim instead of silently overwriting the cell
+    # and leaving the previous occupant's stock rotted in place (or, worse,
+    # treating it as the new product's stock).
+    if previous_producto_id is not None and previous_producto_id != producto_id:
+        await unassign_producto_from_ubicacion(
+            db, ubicacion_id=ubicacion_id, usuario_id=usuario_id
+        )
+        # The unassign committed its own tx and zeroed the cell (REQ-B-001).
+        # Re-read so the remainder of this assign flow operates on FRESH
+        # state (producto_id=NULL, stock_actual=0) — the local ``row``
+        # captured above now holds STALE pre-unassign values.
+        async with db.execute(
+            "SELECT producto_id, stock_actual FROM ubicaciones WHERE id = ?",
+            (ubicacion_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        current_stock_actual = row["stock_actual"]
+    elif previous_producto_id is not None:
+        # Same product already at this cell — preserve the historical
+        # tag-only guard so the FE admin modal can detect "no rewrite
+        # needed" (the object already holds this product); a tag-only call
+        # through ``assign_producto_to_ubicacion`` should not silently
+        # re-zero or re-sum the cell.
+        raise UbicacionOcupadaError("La ubicacion ya tiene un producto asignado")
+    else:
+        current_stock_actual = row["stock_actual"]
 
     # Snapshot the product's stock_general BEFORE any mutation. The rescue
     # helper will call ``get_producto_stock_total`` lazily inside the tx and
