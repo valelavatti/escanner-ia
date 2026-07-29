@@ -13,6 +13,8 @@ from typing import Optional
 
 import aiosqlite
 
+from app.repositories import stock_sin_ubicacion_repository as _bucket_repo
+
 
 class NegativeStockError(Exception):
     """Raised when a movement would result in negative stock."""
@@ -172,16 +174,26 @@ async def _create_movimiento_once(
             # Slice 2b audit-mis-attribution fix (REQ-B-003 + B5): the
             # desasignacion row is the OUTGOING product's audit record.
             # Snapshot the OLD product's stock_general BEFORE any
-            # ubicacion mutation takes effect — the ``stock_general_anterior``
-            # captured at line 145 above is the NEW product's snapshot and was
-            # being used here incorrectly for the OLD product's audit row
-            # (the mis-attribution bug at the original lines 171-184).
+            # ubicacion mutation — the `stock_general_anterior` captured
+            # at line 145 above is the NEW product's snapshot and was
+            # being used here incorrectly for the OLD product's audit
+            # row (the mis-attribution bug at the original lines 171-184).
+            #
+            # Slice 7 fix: ALSO move the OUTGOING product's qty at this
+            # ubicacion into the `stock_sin_ubicacion` bucket. Without
+            # this UPSERT, the `UPDATE ubicaciones SET stock_actual = ...`
+            # at line ~242 OVERWRITES the old product's units, and they
+            # silently vanish from the data model (the user's bug report
+            # after Slice 6: "el stock se pierde al pisar un producto en
+            # el scanner"). The audit's `stock_general_nuevo` now equals
+            # `stock_general_anterior` (units conserved, just moved to
+            # bucket, not lost). Compare against the Slice 2b admin path
+            # (`ubicacion_repository.unassign_producto_from_ubicacion`)
+            # which performs the equivalent UPSERT.
             old_producto_stock_general_anterior = await get_producto_stock_total(
                 db, old_producto_id
             )
-            old_producto_stock_general_nuevo = (
-                old_producto_stock_general_anterior - ubicacion["stock_actual"]
-            )
+            old_producto_stock_general_nuevo = old_producto_stock_general_anterior
             await db.execute(
                 """
                 INSERT INTO movimientos (usuario_id, producto_id, ubicacion_id,
@@ -195,6 +207,9 @@ async def _create_movimiento_once(
                     old_producto_stock_general_anterior,
                     old_producto_stock_general_nuevo,
                 ),
+            )
+            await _bucket_repo.upsert_add(
+                db, old_producto_id, ubicacion["stock_actual"]
             )
 
         if is_new_assignment or is_reassignment:

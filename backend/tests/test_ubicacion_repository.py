@@ -614,7 +614,21 @@ class TestAuditMisAttributionFixAltaReassignment:
         # was 7 at line 145) and used it here for the OLD product's row. Assert
         # this is no longer the case.
         assert row["stock_general_anterior"] != 7
-        assert row["stock_general_nuevo"] == 0  # P's post-reassign = 10 - 10
+        # Slice 7 conservation: the OUTGOING product's units move to its
+        # `stock_sin_ubicacion` bucket (UPSERTed after this INSERT), so the
+        # audit row's `stock_general_nuevo` records the conservation-inclusive
+        # view of P's stock (anterior=10, nuevo=10 — units didn't vanish,
+        # they relocated to the bucket). Note: this is a SLIGHT ASYMMETRY
+        # against the path #2 admin unassign surgery
+        # (`ubicacion_repository.unassign_producto_from_ubicacion` + b6.A in
+        # `test_assign_overwrite_edge_case.py`), which records
+        # `stock_general_nuevo=0` for the same physical scenario (path #2's
+        # audit row records the physical-only post-state). The scanner path
+        # (path #1) instead records the conservation-inclusive-of-bucket
+        # value per the Slice 7 orchestrator decision. Slice 6 Phase C's
+        # endpoint (which adds the bucket back) exposes the SAME display
+        # invariant (sg_api = pure_physical + bucket = 10) on BOTH paths.
+        assert row["stock_general_nuevo"] == 10  # Slice 7 conservation: units moved to bucket, not lost
         assert row["stock_anterior"] == 10  # the OLD qty that left U1
         assert row["stock_nuevo"] == 0       # U1 zeroed from P's perspective
 
