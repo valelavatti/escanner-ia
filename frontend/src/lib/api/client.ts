@@ -1,6 +1,17 @@
 import { get } from 'svelte/store';
 import { browser } from '$app/environment';
 import { sessionStore, clearSession } from '$lib/stores/session';
+import { MOCK_DEPOSITOS, MOCK_ESTANTES, MOCK_PRODUCTOS } from './mock-data';
+
+// ---------------------------------------------------------------------------
+// Dev mode: when the session token is 'dev-token' all API calls are intercepted
+// and mock data is returned instead of hitting the real backend.
+// ---------------------------------------------------------------------------
+function isDevMode(): boolean {
+	if (!browser) return false;
+	const session = get(sessionStore);
+	return session?.token === 'dev-token';
+}
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
 
@@ -356,6 +367,7 @@ export interface MovimientoListResponse {
 }
 
 export async function listDepositos(): Promise<Deposito[]> {
+	if (isDevMode()) return structuredClone(MOCK_DEPOSITOS);
 	return api<Deposito[]>('/depositos');
 }
 
@@ -381,6 +393,12 @@ export async function listEstantes(
 	includeDeleted = false,
 	depositoId: number | null = null
 ): Promise<Estante[]> {
+	if (isDevMode()) {
+		let result = structuredClone(MOCK_ESTANTES) as Estante[];
+		if (!includeDeleted) result = result.filter((e) => !e.deleted_at);
+		if (depositoId != null) result = result.filter((e) => e.deposito_id === depositoId);
+		return result;
+	}
 	const params = new URLSearchParams();
 	params.set('include_deleted', String(includeDeleted));
 	if (depositoId != null) {
@@ -390,6 +408,11 @@ export async function listEstantes(
 }
 
 export async function getEstante(id: number): Promise<Estante> {
+	if (isDevMode()) {
+		const found = MOCK_ESTANTES.find((e) => e.id === id);
+		if (!found) throw new Error(`Estante ${id} no encontrado`);
+		return structuredClone(found) as Estante;
+	}
 	return api<Estante>(`/estantes/${id}`);
 }
 
@@ -422,6 +445,21 @@ export async function confirmDeleteOutOfBounds(
 }
 
 export async function assignProductToUbicacion(ubicacionId: number, productoSku: string): Promise<Ubicacion> {
+	if (isDevMode()) {
+		for (const estante of MOCK_ESTANTES) {
+			const ub = estante.ubicaciones.find((u) => u.id === ubicacionId);
+			if (ub) {
+				const producto = MOCK_PRODUCTOS.find((p) => p.sku === productoSku);
+				ub.producto_id = productoSku;
+				ub.producto_sku = productoSku;
+				ub.producto_descripcion = producto?.descripcion ?? productoSku;
+				ub.stock_actual = ub.stock_actual || 1;
+				ub.estado = 'ocupado';
+				return structuredClone(ub);
+			}
+		}
+		throw new Error('Ubicación no encontrada');
+	}
 	return api<Ubicacion>(`/ubicaciones/${ubicacionId}/assign`, {
 		method: 'PUT',
 		body: JSON.stringify({ producto_id: productoSku })
@@ -429,12 +467,35 @@ export async function assignProductToUbicacion(ubicacionId: number, productoSku:
 }
 
 export async function unassignProductFromUbicacion(ubicacionId: number): Promise<Ubicacion> {
+	if (isDevMode()) {
+		for (const estante of MOCK_ESTANTES) {
+			const ub = estante.ubicaciones.find((u) => u.id === ubicacionId);
+			if (ub) {
+				ub.producto_id = null;
+				ub.producto_sku = null;
+				ub.producto_descripcion = null;
+				ub.stock_actual = 0;
+				ub.estado = 'vacio';
+				return structuredClone(ub);
+			}
+		}
+		throw new Error('Ubicación no encontrada');
+	}
 	return api<Ubicacion>(`/ubicaciones/${ubicacionId}/assign`, {
 		method: 'DELETE'
 	});
 }
 
 export async function searchProductos(query: string): Promise<ProductSearchResult[]> {
+	if (isDevMode()) {
+		const q = query.toLowerCase();
+		return MOCK_PRODUCTOS.filter(
+			(p) =>
+				p.sku.toLowerCase().includes(q) ||
+				p.descripcion.toLowerCase().includes(q) ||
+				p.codigo_de_barra.includes(q)
+		);
+	}
 	const encoded = encodeURIComponent(query);
 	const response = await api<{ items: ProductSearchResult[]; total: number }>(
 		`/productos?search=${encoded}`
@@ -545,6 +606,10 @@ export async function exportMovimientosCSV(filters: MovimientoFilters): Promise<
 }
 
 export async function getEstanteUbicaciones(estanteId: number): Promise<Ubicacion[]> {
+	if (isDevMode()) {
+		const estante = MOCK_ESTANTES.find((e) => e.id === estanteId);
+		return structuredClone(estante?.ubicaciones ?? []);
+	}
 	return api<Ubicacion[]>(`/estantes/${estanteId}/ubicaciones`);
 }
 
