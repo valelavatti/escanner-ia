@@ -44,6 +44,17 @@
 			loading = false;
 		}
 	}
+
+	function devBypass() {
+		const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+		setSession(
+			'dev-token',
+			{ id: 1, nombre: 'Dev Usuario', is_admin: true },
+			expiresAt,
+			[{ deposito_id: 1, deposito_nombre: 'Depósito Central', role: 'admin' }]
+		);
+		goto('/');
+	}
 </script>
 
 <section class="login">
@@ -79,6 +90,12 @@
 	{#if errorMsg}
 		<p class="error" role="alert">{errorMsg}</p>
 	{/if}
+
+	<div class="dev-bypass">
+		<button type="button" class="dev-bypass__btn" onclick={devBypass}>
+			Acceso de desarrollo (sin backend)
+		</button>
+	</div>
 </section>
 
 <style>
@@ -149,5 +166,29 @@
 		background-color: #fee2e2;
 		border-radius: 0.5rem;
 		font-weight: 500;
+	}
+
+	.dev-bypass {
+		border-top: 1px dashed #d1d5db;
+		padding-top: 1rem;
+	}
+
+	.dev-bypass__btn {
+		width: 100%;
+		min-height: 44px;
+		padding: 0.625rem 1rem;
+		font-size: 0.875rem;
+		font-weight: 500;
+		color: #6b7280;
+		background-color: transparent;
+		border: 1px dashed #9ca3af;
+		border-radius: 0.5rem;
+		cursor: pointer;
+	}
+
+	.dev-bypass__btn:hover {
+		background-color: #f9fafb;
+		border-color: #6b7280;
+		color: #374151;
 	}
 </style>
