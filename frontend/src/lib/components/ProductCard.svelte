@@ -11,7 +11,7 @@
 		isSaving: boolean;
 		onQuantityChange: (value: number) => void;
 		onModeChange: (mode: 'alta' | 'ajuste') => void;
-		onSave: () => void;
+		onSave: (drainQty: number) => void;
 		onClose: () => void;
 	}
 
@@ -42,14 +42,63 @@
 
 	let confirmReassign = $state(false);
 
-	// Reset the confirmation whenever a different product (or conflict) is scanned.
+	// Slice 8 — explicit "Utilizar unidades 'sin ubicación'" Feature state.
+	// Visible only when the scanned product has bucket qty > 0 AND the user
+	// is entering an `alta` (only alta adds ubicacion stock — ajuste replaces
+	// it). useBucket toggles the checkbox; drainAmount is the qty the user
+	// wants to rescue from the bucket into the ubicacion. Capped by both
+	// bucket availability and the entered alta cantidad via `canDrain`.
+	let useBucket = $state(false);
+	let drainAmount = $state(0);
+
+	// Reset the confirmation + drain state whenever a different product (or
+	// conflict) is scanned, OR when the mode flips away from `alta`. The
+	// debounce via $effect on the reactive identifiers keeps the UI honest.
 	$effect(() => {
 		product.sku;
 		existingProductoSku;
+		mode;
 		confirmReassign = false;
+		useBucket = false;
+		drainAmount = 0;
 	});
 
 	const saveDisabled = $derived(needsReassignConfirm && !confirmReassign);
+
+	// Slice 8 — show the drain block only when there ARE bucket units for
+	// this product AND the user is in `alta` mode (ajuste replaces
+	// absolute; draining the bucket into an adjusted cell would conflate
+	// the alta/ajuste delta semantics). The input max is the min of the
+	// bucket availability and the alta cantidad the user just entered
+	// (the backend rejects drain > cantidad with HTTP 400 — we expose the
+	// ceiling so the FE input never lets the user transmit an invalid
+	// request in the first place).
+	const showDrainBlock = $derived(bucketQty > 0 && mode === 'alta');
+	const drainMax = $derived(Math.min(bucketQty, Math.max(quantity, 0)));
+	const canDrain = $derived(
+		useBucket && drainAmount > 0 && drainAmount <= bucketQty && drainAmount <= quantity
+	);
+	// Defensive clamp for display: when the user types a value outside the
+	// [0, drainMax] range the browser's `max` attribute alone does not
+	// enforce the bound (it only marks the input as invalid), so a derived
+	// value keeps the explanation copy honest. The raw `drainAmount` state
+	// is what `bind:value` writes; we READ the clamped form below without
+	// mutating state from an `$effect` (which would risk a Svelte 5
+	// effect-loop warning). `canDrain` gate at save time protects the
+	// backend independently of the display clamp.
+	const drainAmountClamped = $derived(
+		Number.isFinite(drainAmount)
+			? Math.max(0, Math.min(drainAmount, drainMax))
+			: 0
+	);
+
+	function handleSave() {
+		// Slice 8 — pass the drain qty to the parent's `handleSave`; 0 when
+		// the user did NOT toggle the checkbox (or when no bucket is
+		// available). The backend treats 0 as the historical no-drain
+		// alta path — so default behavior preserves all prior scanner UX.
+		onSave(canDrain ? drainAmount : 0);
+	}
 </script>
 
 <div class="product-card">
@@ -102,6 +151,48 @@
 		</div>
 	{/if}
 
+	{#if showDrainBlock}
+		<div class="product-card__drain" data-can-drain={canDrain}>
+			<label class="product-card__drain-toggle">
+				<input
+					type="checkbox"
+					bind:checked={useBucket}
+					disabled={isSaving || quantity <= 0}
+				/>
+				<span>
+					Utilizar unidades <strong>'sin ubicación'</strong>
+					{#if useBucket}
+						— de las {quantity} a asignar, usar
+						<span class="product-card__drain-amount">
+							{#if drainAmountClamped > 0 && canDrain}
+								{drainAmountClamped} del bucket y {quantity - drainAmountClamped} nuevas
+							{:else}
+								{quantity} nuevas (sin drenaje)
+							{/if}
+						</span>
+					{/if}
+				</span>
+			</label>
+			{#if useBucket}
+				<label class="product-card__drain-field">
+					<span>Unidades a usar del bucket (máx. {drainMax})</span>
+					<input
+						type="number"
+						min="0"
+						max={drainMax}
+						step="1"
+						bind:value={drainAmount}
+						disabled={isSaving}
+						inputmode="numeric"
+					/>
+				</label>
+				<p class="product-card__drain-explanation">
+					De las {quantity} unidades a asignar, {drainAmountClamped > 0 && canDrain ? drainAmountClamped : 0} vendrán del bucket y {quantity - (drainAmountClamped > 0 && canDrain ? drainAmountClamped : 0)} se contarán como nuevas.
+				</p>
+			{/if}
+		</div>
+	{/if}
+
 	<StockInput
 		{quantity}
 		{mode}
@@ -111,7 +202,7 @@
 		{saveDisabled}
 		{onQuantityChange}
 		{onModeChange}
-		{onSave}
+		onSave={handleSave}
 		{onClose}
 	/>
 </div>
@@ -194,6 +285,75 @@
 		color: #b45309;
 		background-color: #fffbeb;
 		border: 2px dashed #f59e0b;
+	}
+
+	/* Slice 8 — explicit `drain_bucket_qty` Feature UI. Mirrors the amber
+	   palette of the bucket-row above so "this control talks to the same
+	   stock concept" is visually obvious. The toggle grows into a
+	   sub-section with a number input + a live how-the-qty-composes
+	   explanation. Defensive guard: the `[data-can-drain='false']` selector
+	   is kept available for future amplitude (e.g. a lament-red border on
+	   invalid input); today the FE never lets drainAmount exceed drainMax
+	   because the $effect clamps it, so it stays truthful. */
+	.product-card__drain {
+		display: flex;
+		flex-direction: column;
+		gap: 0.625rem;
+		padding: 0.75rem 1rem;
+		font-size: 0.9375rem;
+		font-weight: 600;
+		line-height: 1.4;
+		color: #92400e;
+		background-color: #fffbeb;
+		border: 2px dashed #f59e0b;
+		border-radius: 0.5rem;
+	}
+
+	.product-card__drain-toggle {
+		display: flex;
+		align-items: flex-start;
+		gap: 0.625rem;
+		cursor: pointer;
+		touch-action: manipulation;
+	}
+
+	.product-card__drain-toggle input {
+		flex-shrink: 0;
+		width: 1.25rem;
+		height: 1.25rem;
+		margin-top: 0.125rem;
+		accent-color: #b45309;
+		cursor: pointer;
+	}
+
+	.product-card__drain-amount {
+		font-weight: 700;
+	}
+
+	.product-card__drain-field {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+		font-size: 0.875rem;
+		font-weight: 500;
+		color: #78350f;
+	}
+
+	.product-card__drain-field input {
+		min-height: 2.5rem;
+		padding: 0.375rem 0.5rem;
+		font-size: 1rem;
+		color: #0f172a;
+		background-color: #ffffff;
+		border: 1px solid #f59e0b;
+		border-radius: 0.375rem;
+	}
+
+	.product-card__drain-explanation {
+		margin: 0;
+		font-size: 0.8125rem;
+		font-weight: 500;
+		color: #78350f;
 	}
 
 	.product-card__warning {

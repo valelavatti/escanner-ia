@@ -103,8 +103,35 @@ async def _create_movimiento_once(
     ubicacion_id: int,
     cantidad: int,
     tipo: str,
+    drain_bucket_qty: int = 0,
 ) -> dict:
-    """Execute a single stock movement transaction (no retry wrapping)."""
+    """Execute a single stock movement transaction (no retry wrapping).
+
+    Slice 8 — ``drain_bucket_qty > 0`` enables the EXPLICIT bucket-rescue
+    feature. The user-input ``cantidad`` IS the FINAL ubicacion stock
+    (alta means nuevo=cantidad, ajuste too); ``drain_bucket_qty`` is how
+    many units of that qty come FROM the sin-ubicacion bucket (rescued
+    into the ubicacion). When > 0 the function:
+      * validates ``drain_bucket_qty <= bucket_qty_for_product`` (else
+        ValueError → 400 in route),
+      * validates ``drain_bucket_qty <= cantidad`` (cannot ingest more
+        into the ubicacion than the alta/ajuste declares; else
+        ValueError → 400 in route),
+      * calls ``stock_sin_ubicacion_repository.drain(...)`` inside the
+        same BEGIN/commit envelope (R1 deletes the row when cantidad
+        reaches 0),
+      * writes one additional ``rescate_sin_ubicacion`` movimiento row
+        for the drained qty with conservation snapshots
+        (``stock_general_anterior == stock_general_nuevo == sg_anterior``;
+        ``stock_sin_ubicacion_anterior`` = bucket pre-drain,
+        ``stock_sin_ubicacion_nuevo`` = bucket post-drain).
+
+    The alta/ajuste audit row's ``stock_general_nuevo`` is corrected by
+    subtracting ``drain_bucket_qty`` (units that came from the bucket
+    conserved sg, did NOT add new units to sg). Bucket snapshots
+    (``stock_sin_ubicacion_anterior/nuevo``) are written on EVERY audit
+    row this tx emits (desasignacion, asignacion, alta/ajuste, rescate).
+    """
     if tipo not in ("alta", "ajuste"):
         raise ValueError("tipo debe ser 'alta' o 'ajuste'")
 
@@ -144,7 +171,46 @@ async def _create_movimiento_once(
         es_suelto = ubicacion["estante_nombre"] == "Suelto"
 
         # Snapshot the product's general stock BEFORE any changes in this TX.
+        # Slice 8 — Bug 1 fix: get_producto_stock_total NOW includes the
+        # bucket qty per the 3-stock invariant, so this snapshot will see
+        # physical + Suelto + bucket.
         stock_general_anterior = await get_producto_stock_total(db, producto_sku)
+
+        # Slice 8 — Bucket snapshot for the NEW product BEFORE any drain.
+        # Both the alta/ajuste audit row and the optional rescate row
+        # carry ``stock_sin_ubicacion_anterior`` = this value; the
+        # ``stock_sin_ubicacion_nuevo`` is computed below depending on
+        # whether ``drain_bucket_qty > 0``.
+        bucket_anterior_for_audit = await _bucket_repo.get_cantidad(db, producto_sku)
+
+        # Validate drain_bucket_qty (the explicit bucket-rescue feature).
+        # The ubicacion's FINAL stock IS the user-input ``cantidad``
+        # (alta and ajuste both end at ``cantidad``), and ``drain_bucket_qty``
+        # specifies how many units of that final qty come FROM the bucket.
+        # Therefore (a) the bucket must have at least ``drain_bucket_qty``
+        # units available, and (b) the user can't rescue more units into
+        # the ubicacion than the cantidad they declared. Both invariants
+        # trigger ValueError (caught by the route →  HTTP 400).
+        if drain_bucket_qty < 0:
+            raise ValueError("drain_bucket_qty no puede ser negativo")
+        if drain_bucket_qty > 0:
+            if drain_bucket_qty > bucket_anterior_for_audit:
+                raise ValueError(
+                    f"Unidades disponibles en bucket "
+                    f"({bucket_anterior_for_audit}) insuficientes para drain "
+                    f"{drain_bucket_qty}"
+                )
+            if drain_bucket_qty > cantidad:
+                raise ValueError(
+                    f"drain_bucket_qty ({drain_bucket_qty}) no puede ser mayor "
+                    f"a la cantidad ingresada ({cantidad})"
+                )
+
+        bucket_nuevo_for_audit = (
+            bucket_anterior_for_audit - drain_bucket_qty
+            if drain_bucket_qty > 0
+            else bucket_anterior_for_audit
+        )
 
         # Read stock inside the transaction so concurrent writers serialize
         # and the second movement sees the updated stock from the first.
@@ -175,21 +241,32 @@ async def _create_movimiento_once(
             # desasignacion row is the OUTGOING product's audit record.
             # Snapshot the OLD product's stock_general BEFORE any
             # ubicacion mutation — the `stock_general_anterior` captured
-            # at line 145 above is the NEW product's snapshot and was
+            # at line ~150 above is the NEW product's snapshot and was
             # being used here incorrectly for the OLD product's audit
             # row (the mis-attribution bug at the original lines 171-184).
             #
             # Slice 7 fix: ALSO move the OUTGOING product's qty at this
             # ubicacion into the `stock_sin_ubicacion` bucket. Without
             # this UPSERT, the `UPDATE ubicaciones SET stock_actual = ...`
-            # at line ~242 OVERWRITES the old product's units, and they
-            # silently vanish from the data model (the user's bug report
-            # after Slice 6: "el stock se pierde al pisar un producto en
-            # el scanner"). The audit's `stock_general_nuevo` now equals
+            # below OVERWRITES the old product's units, and they silently
+            # vanish from the data model (the user's bug report after
+            # Slice 6: "el stock se pierde al pisar un producto en el
+            # scanner"). The audit's `stock_general_nuevo` now equals
             # `stock_general_anterior` (units conserved, just moved to
             # bucket, not lost). Compare against the Slice 2b admin path
             # (`ubicacion_repository.unassign_producto_from_ubicacion`)
             # which performs the equivalent UPSERT.
+            #
+            # Slice 8 — bucket snapshots on the OUTGOING product's row:
+            # the OLD product's bucket goes from X (pre-UPSERT) to
+            # X + ubicacion.stock_actual (post-UPSERT) — units conserved
+            # into the bucket, recorded in the audit row.
+            old_producto_bucket_anterior = await _bucket_repo.get_cantidad(
+                db, old_producto_id
+            )
+            old_producto_bucket_nuevo = (
+                old_producto_bucket_anterior + ubicacion["stock_actual"]
+            )
             old_producto_stock_general_anterior = await get_producto_stock_total(
                 db, old_producto_id
             )
@@ -198,14 +275,17 @@ async def _create_movimiento_once(
                 """
                 INSERT INTO movimientos (usuario_id, producto_id, ubicacion_id,
                     cantidad, stock_anterior, stock_nuevo, tipo,
-                    stock_general_anterior, stock_general_nuevo)
-                VALUES (?, ?, ?, 0, ?, 0, 'desasignacion', ?, ?)
+                    stock_general_anterior, stock_general_nuevo,
+                    stock_sin_ubicacion_anterior, stock_sin_ubicacion_nuevo)
+                VALUES (?, ?, ?, 0, ?, 0, 'desasignacion', ?, ?, ?, ?)
                 """,
                 (
                     usuario_id, old_producto_id, ubicacion_id,
                     ubicacion["stock_actual"],
                     old_producto_stock_general_anterior,
                     old_producto_stock_general_nuevo,
+                    old_producto_bucket_anterior,
+                    old_producto_bucket_nuevo,
                 ),
             )
             await _bucket_repo.upsert_add(
@@ -213,21 +293,79 @@ async def _create_movimiento_once(
             )
 
         if is_new_assignment or is_reassignment:
+            # Slice 8 — bucket snapshot for the NEW product's tag event:
+            # the new product's bucket goes from ``bucket_anterior_for_audit``
+            # (pre-drain) to ``bucket_nuevo_for_audit`` (post-drain if the
+            # user requested drain). The asignacion row records the
+            # bucket-state transition the user is causing on the incoming
+            # product by the end of this tx (anterior = pre-tx snapshot,
+            # nuevo = post-tx snapshot). stock_general snapshots for the
+            # tag event are unchanged (= the pre-tx sg) per existing
+            # convention; the alta row below records the sg delta.
             await db.execute(
                 """
                 INSERT INTO movimientos (usuario_id, producto_id, ubicacion_id,
                     cantidad, stock_anterior, stock_nuevo, tipo,
-                    stock_general_anterior, stock_general_nuevo)
-                VALUES (?, ?, ?, 0, 0, 0, 'asignacion', ?, ?)
+                    stock_general_anterior, stock_general_nuevo,
+                    stock_sin_ubicacion_anterior, stock_sin_ubicacion_nuevo)
+                VALUES (?, ?, ?, 0, 0, 0, 'asignacion', ?, ?, ?, ?)
                 """,
                 (
                     usuario_id, producto_sku, ubicacion_id,
                     stock_general_anterior, stock_general_anterior,
+                    bucket_anterior_for_audit, bucket_nuevo_for_audit,
                 ),
             )
 
-        # Calculate stock general after the stock change.
-        stock_general_nuevo = stock_general_anterior + (stock_nuevo - stock_anterior)
+        # Slice 8 — If the user requested an explicit bucket drain, write
+        # the additional ``rescate_sin_ubicacion`` audit row BEFORE the
+        # alta/ajuste main row so the rescue event precedes the count
+        # event in the audit timeline. The rescue uses CONSERVATION
+        # semantics on stock_general: the user-visible total doesn't
+        # change because units moved bucket→physical are conserved; we
+        # record ``anterior = nuevo = sg_anterior_L147`` (the pre-tx sg,
+        # which after Bug 1 includes the full pre-drain bucket). The
+        # bucket-side snapshot ``stock_sin_ubicacion_anterior/nuevo``
+        # records the bucket shrinking from ``bucket_anterior_for_audit``
+        # to ``bucket_nuevo_for_audit``. The actual ``drain()`` call
+        # happens on the SAME tx after this INSERT — the audit row
+        # formally records the END state of the rescue event.
+        if drain_bucket_qty > 0:
+            await db.execute(
+                """
+                INSERT INTO movimientos (usuario_id, producto_id, ubicacion_id,
+                    cantidad, stock_anterior, stock_nuevo, tipo,
+                    stock_general_anterior, stock_general_nuevo,
+                    stock_sin_ubicacion_anterior, stock_sin_ubicacion_nuevo)
+                VALUES (?, ?, ?, ?, 0, ?, 'rescate_sin_ubicacion', ?, ?, ?, ?)
+                """,
+                (
+                    usuario_id, producto_sku, ubicacion_id,
+                    drain_bucket_qty, drain_bucket_qty,
+                    stock_general_anterior, stock_general_anterior,
+                    bucket_anterior_for_audit, bucket_nuevo_for_audit,
+                ),
+            )
+            # Apply the bucket drain inside the SAME tx (R1 deletes the
+            # row when cantidad reaches 0 — caller-side of the repo's R1
+            # discipline still enforced inside the same BEGIN/commit).
+            await _bucket_repo.drain(db, producto_sku, drain_bucket_qty)
+
+        # Calculate stock_general_nuevo after the stock change.
+        # Slice 8 — Bug 1 + drain correction: thealta's physical increment
+        # is ``stock_nuevo - stock_anterior`` (= cantidad for alta,
+        # cantidad - stock_anterior for ajuste). But ``drain_bucket_qty``
+        # units of that increment came FROM the bucket (conserved on
+        # ``stock_general``), so they must NOT be counted as sg increase.
+        # Subtract drain_bucket_qty from the formula. When
+        # ``drain_bucket_qty == 0`` (the common path), the formula
+        # reduces to ``sg_anterior + delta`` — identical to pre-Slice-8
+        # behavior.
+        stock_general_nuevo = (
+            stock_general_anterior
+            + (stock_nuevo - stock_anterior)
+            - drain_bucket_qty
+        )
 
         # Insert the immutable audit record for the stock change.
         cursor = await db.execute(
@@ -235,8 +373,9 @@ async def _create_movimiento_once(
             INSERT INTO movimientos
                 (usuario_id, producto_id, ubicacion_id, cantidad,
                  stock_anterior, stock_nuevo, tipo,
-                 stock_general_anterior, stock_general_nuevo)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 stock_general_anterior, stock_general_nuevo,
+                 stock_sin_ubicacion_anterior, stock_sin_ubicacion_nuevo)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 usuario_id,
@@ -248,6 +387,8 @@ async def _create_movimiento_once(
                 tipo,
                 stock_general_anterior,
                 stock_general_nuevo,
+                bucket_anterior_for_audit,
+                bucket_nuevo_for_audit,
             ),
         )
         movimiento_id = cursor.lastrowid
@@ -291,6 +432,7 @@ async def create_movimiento(
     ubicacion_id: int,
     cantidad: int,
     tipo: str = "alta",
+    drain_bucket_qty: int = 0,
 ) -> dict:
     """Create a stock movement with SQLITE_BUSY retry.
 
@@ -301,6 +443,12 @@ async def create_movimiento(
         ubicacion_id: ID of the affected location.
         cantidad: For ``alta``, amount to add. For ``ajuste``, new absolute stock.
         tipo: ``alta`` or ``ajuste``.
+        drain_bucket_qty: Slice 8 — units to "rescue" from the product's
+            ``stock_sin_ubicacion`` bucket into ``ubicacion_id`` (default 0
+            = no drain; 0 is silently accepted and no rescate audit row is
+            written). MUST be <= bucket_qty AND <= ``cantidad``;
+            ``ValueError`` raised otherwise (caught by the route and
+            returned as HTTP 400).
 
     Returns:
         The created movement record with joined display fields.
@@ -309,13 +457,21 @@ async def create_movimiento(
         ProductoNotFoundError: If the SKU does not exist.
         UbicacionNotFoundError: If the location does not exist.
         NegativeStockError: If the movement would result in negative stock.
+        ValueError: If ``drain_bucket_qty`` violates the rescate contract
+            (insufficient bucket, or drain exceeds cantidad).
         DatabaseBusyError: If SQLite remains locked after all retries.
     """
     last_error: Optional[Exception] = None
     for attempt, delay_ms in zip(range(_MAX_RETRIES), _RETRY_DELAYS_MS):
         try:
             return await _create_movimiento_once(
-                db, usuario_id, producto_sku, ubicacion_id, cantidad, tipo
+                db,
+                usuario_id,
+                producto_sku,
+                ubicacion_id,
+                cantidad,
+                tipo,
+                drain_bucket_qty,
             )
         except sqlite3.OperationalError as exc:
             last_error = exc
@@ -359,6 +515,8 @@ async def get_movimiento_by_id(db: aiosqlite.Connection, movimiento_id: int) -> 
             m.stock_nuevo,
             m.stock_general_anterior,
             m.stock_general_nuevo,
+            m.stock_sin_ubicacion_anterior,
+            m.stock_sin_ubicacion_nuevo,
             m.timestamp,
             m.tipo
         FROM movimientos m
@@ -448,11 +606,35 @@ async def get_stock_by_producto_in_ubicacion(
 
 
 async def get_producto_stock_total(db: aiosqlite.Connection, producto_sku: str) -> int:
-    """Return the total stock of a product across ALL ubicaciones.
+    """Return the user-visible TOTAL stock of a product across ALL channels.
 
-    For regular shelves: SUM(ubicaciones.stock_actual) WHERE producto_id = sku.
-    For Suelto: SUM(movimientos.cantidad) WHERE producto_id = sku AND estante is Suelto.
-    Combined = regular_sum + suelto_sum.
+    Slice 8 — Bug 1 fix: this function now ALSO includes the
+    ``stock_sin_ubicacion`` bucket qty (the "sin ubicación" transit-state
+    units). Previously it returned physical + Suelto ONLY; snapshots taken
+    inside ``_create_movimiento_once`` (lines 147, 193) and helpers in
+    ``ubicacion_repository`` therefore UNDER-recorded the user-visible
+    ``stock_general`` when a product had bucket units (the user's Bug 1
+    report: historial showed "Stock general: 0 → 25" but the product
+    already had 30 units in the bucket, so the displayed diagonal was
+    wrong).
+
+    Combined formula (per the 3-stock concept in
+    ``stock_sin_ubicacion_repository``):
+        regular_sum (ubicaciones.stock_actual WHERE producto_id = sku)
+        + suelto_sum (movimientos.cantidad for Suelto estante rows)
+        + bucket_sum (stock_sin_ubicacion.cantidad for producto_id = sku)
+
+    Consumers:
+      * ``_create_movimiento_once`` uses this snapshot at lines 147 (NEW
+        product's pre-tx ``stock_general_anterior``) and 193 (OLD
+        product's pre-tx snapshot inside the reassignment audit branch).
+      * ``create_movimiento_rescate_sin_ubicacion`` lazily snapshots via
+        this function inside the path #2 assign surgery (the lazy-snapshot
+        placement is documented in the Slice 2a helper docstring).
+      * The endpoint ``GET /productos/{codigo_de_barra}/stock-total`` used
+        to ADD the bucket on top of this function; since Slice 8 it no
+        longer does (the addition is internalized HERE, fixing the
+        double-count).
     """
     regular = await _fetch_one_row(
         db,
@@ -474,7 +656,9 @@ async def get_producto_stock_total(db: aiosqlite.Connection, producto_sku: str) 
     )
     suelto_stock = int(suelto["total"]) if suelto else 0
 
-    return regular_stock + suelto_stock
+    bucket_stock = await _bucket_repo.get_cantidad(db, producto_sku)
+
+    return regular_stock + suelto_stock + bucket_stock
 
 
 async def get_producto_ubicaciones(
@@ -711,6 +895,8 @@ async def list_movimientos(
             m.stock_nuevo,
             m.stock_general_anterior,
             m.stock_general_nuevo,
+            m.stock_sin_ubicacion_anterior,
+            m.stock_sin_ubicacion_nuevo,
             m.timestamp,
             m.tipo
         FROM movimientos m
@@ -874,6 +1060,8 @@ async def create_movimiento_rescate_sin_ubicacion(
     ubicacion_id: int,
     qty: int,
     usuario_id: Optional[int] = None,
+    stock_sin_ubicacion_anterior: int = 0,
+    stock_sin_ubicacion_nuevo: int = 0,
 ) -> int:
     """Record a ``rescate_sin_ubicacion`` movimiento: ``qty`` units rescued
     FROM the sin-ubicacion bucket INTO ``ubicacion_id``.
@@ -895,6 +1083,16 @@ async def create_movimiento_rescate_sin_ubicacion(
         call this helper BEFORE updating ``ubicaciones.stock_actual`` for the
         rescue so the snapshot reflects the pre-mutation state.
       * ``stock_general_nuevo``    = ``stock_general_anterior + qty``.
+
+    Slice 8 — ``stock_sin_ubicacion_anterior`` / ``stock_sin_ubicacion_nuevo``
+    args let the caller record the bucket-side delta (anterior=bucket
+    pre-drain, nuevo=bucket post-drain). Default 0 — historically the helper
+    ignored the bucket snapshot (Slice 2a/b did not have columns for it;
+    migration 017 added them). Callers (e.g. the path #2 admin surgery via
+    ``ubicacion_repository``) may not yet pass these — in that case the
+    columns are inserted as 0 / 0 (the table's ``DEFAULT 0`` honors the NOT
+    NULL constraint). This is the tolerated path #2 audit-shape asymmetry
+    flagged in the Slice 7 apply-progress.
 
     Per-ubicacion snapshots:
       * ``stock_anterior`` = 0 (the assigned location's prior quantity is
@@ -918,6 +1116,12 @@ async def create_movimiento_rescate_sin_ubicacion(
             qty == 0 are never written — the caller guards on ``drained > 0``
             per task 2b.2).
         usuario_id: Optional user id for audit attribution (NULL allowed).
+        stock_sin_ubicacion_anterior: Slice 8 — bucket qty BEFORE the drain
+            (default 0; pass the pre-drain bucket qty for path #1-style
+            callers that want a truthful ``historial`` "Sin ubicación: A →
+            N" rendering).
+        stock_sin_ubicacion_nuevo: Slice 8 — bucket qty AFTER the drain
+            (default 0).
 
     Returns:
         The new ``movimientos.id``.
@@ -929,9 +1133,10 @@ async def create_movimiento_rescate_sin_ubicacion(
         INSERT INTO movimientos (
             usuario_id, producto_id, ubicacion_id, cantidad,
             stock_anterior, stock_nuevo, tipo,
-            stock_general_anterior, stock_general_nuevo
+            stock_general_anterior, stock_general_nuevo,
+            stock_sin_ubicacion_anterior, stock_sin_ubicacion_nuevo
         )
-        VALUES (?, ?, ?, ?, ?, ?, 'rescate_sin_ubicacion', ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, 'rescate_sin_ubicacion', ?, ?, ?, ?)
         """,
         (
             usuario_id,
@@ -942,6 +1147,8 @@ async def create_movimiento_rescate_sin_ubicacion(
             qty,
             stock_general_anterior,
             stock_general_nuevo,
+            stock_sin_ubicacion_anterior,
+            stock_sin_ubicacion_nuevo,
         ),
     )
     return cursor.lastrowid
@@ -952,6 +1159,8 @@ async def create_movimiento_salvage_cleanup(
     ubicacion_id: int,
     qty: int,
     usuario_id: Optional[int] = None,
+    stock_sin_ubicacion_anterior: int = 0,
+    stock_sin_ubicacion_nuevo: int = 0,
 ) -> int:
     """Record a ``salvage_cleanup`` movimiento for ``qty`` orphan units at
     ``ubicacion_id`` (``producto_id`` is intentionally NULL — see REQ-D-002).
@@ -970,7 +1179,8 @@ async def create_movimiento_salvage_cleanup(
     ``stock_general_anterior`` and ``stock_general_nuevo`` columns cannot be
     computed from existing data — they are recorded as 0 / 0 (the orphan's
     stock contributes nothing to any product's ``stock_general``, since no
-    product is linked to it).
+    product is linked to it). The two Slice 8 ``stock_sin_ubicacion_*``
+    columns default to 0 for the same reason (no product = no bucket row).
 
     The FK on ``movimientos.producto_id`` to ``productos(sku)`` accepts NULL
     (per migration 001:82 — ``producto_id TEXT`` has no NOT NULL). SQLite's
@@ -990,6 +1200,10 @@ async def create_movimiento_salvage_cleanup(
             call time; the caller is expected to zero it in the same tx).
         usuario_id: Optional user id for audit attribution (NULL allowed —
             backfill typically has no live user session).
+        stock_sin_ubicacion_anterior: Slice 8 — bucket qty before this
+            cleanup (default 0; orphans have no product so no bucket row).
+        stock_sin_ubicacion_nuevo: Slice 8 — bucket qty after this cleanup
+            (default 0).
 
     Returns:
         The new ``movimientos.id``.
@@ -999,11 +1213,13 @@ async def create_movimiento_salvage_cleanup(
         INSERT INTO movimientos (
             usuario_id, producto_id, ubicacion_id, cantidad,
             stock_anterior, stock_nuevo, tipo,
-            stock_general_anterior, stock_general_nuevo
+            stock_general_anterior, stock_general_nuevo,
+            stock_sin_ubicacion_anterior, stock_sin_ubicacion_nuevo
         )
-        VALUES (?, NULL, ?, ?, ?, 0, 'salvage_cleanup', 0, 0)
+        VALUES (?, NULL, ?, ?, ?, 0, 'salvage_cleanup', 0, 0, ?, ?)
         """,
-        (usuario_id, ubicacion_id, qty, qty),
+        (usuario_id, ubicacion_id, qty, qty,
+         stock_sin_ubicacion_anterior, stock_sin_ubicacion_nuevo),
     )
     return cursor.lastrowid
 

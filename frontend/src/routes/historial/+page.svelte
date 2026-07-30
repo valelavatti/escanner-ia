@@ -225,6 +225,29 @@
 		return `Stock general: ${m.stock_general_anterior} → ${m.stock_general_nuevo}`;
 	}
 
+	// Slice 8 — expose the bucket-side delta ("Sin ubicación: A → N") so the
+	// user can see the `stock_sin_ubicacion` snapshot transition alongside
+	// the existing "Stock general" line. Show the row when at least one of
+	// the snapshots differs OR the movimiento is itself a
+	// `rescate_sin_ubicacion` event (the rescue's whole payload IS the
+	// bucket delta — even when anterior==nuevo==0 on a fully-conserved
+	// rescue, the user wants to see the bucket bookkeeping row). For
+	// historical rows (pre-migration-017 NOT NULL DEFAULT 0) both
+	// snapshots are 0 → the row collapses to "0 → 0" which we DO render
+	// only when the row is a rescue ('rescate_sin_ubicacion') — that lets
+	// the operator verify buckets even on rows that the Slice 8 wiring
+	// touched after the migration.
+	function formatSinUbicacion(m: MovimientoResponse): string | null {
+		if (!m.producto_sku) return null;
+		if (
+			m.stock_sin_ubicacion_anterior === m.stock_sin_ubicacion_nuevo &&
+			m.tipo !== 'rescate_sin_ubicacion'
+		) {
+			return null;
+		}
+		return `Sin ubicación: ${m.stock_sin_ubicacion_anterior} → ${m.stock_sin_ubicacion_nuevo}`;
+	}
+
 	function formatUbicacion(m: MovimientoResponse): string {
 		return `${m.estante_nombre} F${m.fila_label}-C${m.columna_label} — ${m.ubicacion_qr}`;
 	}
@@ -361,14 +384,19 @@
 								{formatStockChange(movimiento)}
 							</p>
 						{/if}
-						{#if formatStockGeneral(movimiento)}
-							<p class="movimiento-card__stock-general">
-								{formatStockGeneral(movimiento)}
-							</p>
-						{/if}
-							<p class="movimiento-card__producto">
-								{movimiento.producto_descripcion ?? ''}
-							</p>
+{#if formatStockGeneral(movimiento)}
+						<p class="movimiento-card__stock-general">
+							{formatStockGeneral(movimiento)}
+						</p>
+					{/if}
+					{#if formatSinUbicacion(movimiento)}
+						<p class="movimiento-card__stock-sin-ubicacion">
+							{formatSinUbicacion(movimiento)}
+						</p>
+					{/if}
+						<p class="movimiento-card__producto">
+							{movimiento.producto_descripcion ?? ''}
+						</p>
 							<p class="movimiento-card__ubicacion">
 								📍 {formatUbicacion(movimiento)}
 							</p>
@@ -667,6 +695,16 @@
 		font-size: 0.8125rem;
 		font-weight: 500;
 		color: #64748b;
+	}
+
+/* Slice 8 — "Sin ubicación: A → N" delta row mirrors the stock-general
+   delta row but uses a slightly warmer tone + amber accent so the bucket
+   bookkeeping reads visually distinct from the general stock trend. */
+	.movimiento-card__stock-sin-ubicacion {
+		margin: 0;
+		font-size: 0.8125rem;
+		font-weight: 500;
+		color: #b45309;
 	}
 
 	.movimiento-card__producto {

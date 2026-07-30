@@ -182,10 +182,12 @@ class TestAssignOverwriteWithQtyZero:
         assert await _bucket_qty(db_session, p) == 10
         assert await _bucket_qty(db_session, q) == 0
 
-        # P's stock_general is now 0 (the bucket is NOT counted in
-        # stock_general per the 3-stock concept). Q's stock_general is 0
-        # (entered_qty=0, so Q has no physical stock).
-        assert await _mov_repo.get_producto_stock_total(db_session, p) == 0
+        # P's stock_general: Slice 8 Bug 1 fix means `get_producto_stock_total`
+        # now INCLUDES the bucket qty, so P (= 0 physical at any cell + 10 in
+        # the bucket) reports sg = 10 (was 0 pre-Slice-8 — the bucket was
+        # silently dropped by the old physical-only sum). Q's stock_general
+        # is 0 (entered_qty=0, Q has no physical cell AND no bucket row).
+        assert await _mov_repo.get_producto_stock_total(db_session, p) == 10
         assert await _mov_repo.get_producto_stock_total(db_session, q) == 0
 
         # Desasignacion row for P: exactly one, with the OUTGOING (P)
@@ -270,9 +272,10 @@ class TestAssignOverwriteWithQtyFive:
         assert await _bucket_qty(db_session, p) == 10
         assert await _bucket_qty(db_session, q) == 0
 
-        # Stock_general invariants: P=0 (all in bucket — not counted); Q=5
-        # (U1 holds 5 of Q). REQ-B-009.
-        assert await _mov_repo.get_producto_stock_total(db_session, p) == 0
+        # Stock_general invariants (Slice 8 Bug 1 fix): P's `get_producto_stock_total`
+        # now INCLUDES the bucket (10 in P's bucket + 0 physical = 10); Q's
+        # = 5 (the physical stock at U1 + 0 in bucket). REQ-B-009.
+        assert await _mov_repo.get_producto_stock_total(db_session, p) == 10
         assert await _mov_repo.get_producto_stock_total(db_session, q) == 5
 
         # Desasignacion row for P at U1: exactly one, with P's snapshots.

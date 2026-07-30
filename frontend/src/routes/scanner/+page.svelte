@@ -283,7 +283,7 @@ let bucketQty = $state(0);
 		mode = 'alta';
 	}
 
-	async function handleSave() {
+	async function handleSave(drainQty: number = 0) {
 		const location = get(anchoredLocation);
 		if (!location || !scannedProduct) {
 			showError('No hay producto ni ubicación para guardar');
@@ -295,13 +295,19 @@ let bucketQty = $state(0);
 			return;
 		}
 
+		// Slice 8 — Feature: pass the explicit drain_bucket_qty from the
+		// ProductCard checkbox into createMovimiento. The backend validates
+		// drain_bucket_qty <= bucket_qty AND <= cantidad; any violation
+		// surfaces as an ApiError(400) which we already render below.
+		const safeDrainQty = Math.max(0, Math.min(drainQty, quantity));
 		isSaving = true;
 		try {
 			const response = await createMovimiento({
 				producto_sku: scannedProduct.sku,
 				ubicacion_id: location.ubicacion_id,
 				cantidad: quantity,
-				tipo: mode
+				tipo: mode,
+				...(safeDrainQty > 0 ? { drain_bucket_qty: safeDrainQty } : {})
 			});
 
 			showGreenFlash(`Stock guardado: ${response.stock_anterior} → ${response.stock_nuevo}`);
@@ -317,7 +323,19 @@ let bucketQty = $state(0);
 				};
 			}
 
-			stockTotal += response.stock_nuevo - response.stock_anterior;
+			// Slice 8 — adjust the surfaced stock and bucket state after a
+			// successful save. (a) `stockTotal` is the user-visible
+			// `stock_general` (= pure_physical + bucket after Bug 1 fix),
+			// so the delta is `qty_added_to_physical − drain_from_bucket` =
+			// `(stock_nuevo − stock_anterior) − drainQty` (the drained units
+			// just relocated from bucket to physical; sg unchanged by the
+			// move). (b) `bucketQty` drops by `drainQty` (units left the
+			// bucket); clamped at 0 to avoid negative display if the BE
+			// validation ever allows a partial drain on a smaller residual.
+			stockTotal += response.stock_nuevo - response.stock_anterior - safeDrainQty;
+			if (safeDrainQty > 0) {
+				bucketQty = Math.max(0, bucketQty - safeDrainQty);
+			}
 			quantity = 0;
 			scannerRef?.resume();
 		} catch (err) {

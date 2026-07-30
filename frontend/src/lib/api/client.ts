@@ -337,6 +337,13 @@ export interface MovimientoCreate {
 	ubicacion_id: number;
 	cantidad: number;
 	tipo: 'alta' | 'ajuste';
+	// Slice 8 — Feature: how many units of the entered `cantidad` should
+	// come FROM the product's `stock_sin_ubicacion` bucket (rescued into
+	// the scanned ubicacion). 0 (default) means a pure physical alta/ajuste
+	// — no bucket drain, no `rescate_sin_ubicacion` audit row. The backend
+	// validates `<= bucket_qty` AND `<= cantidad`, returning HTTP 400
+	// otherwise (the FE's ProductCard checkbox controls this value).
+	drain_bucket_qty?: number;
 }
 
 export interface MovimientoResponse {
@@ -359,6 +366,13 @@ export interface MovimientoResponse {
 	tipo: string;
 	stock_general_anterior: number;
 	stock_general_nuevo: number;
+	// Slice 8 — `stock_sin_ubicacion` bucket snapshots (one per audit row).
+	// Backend default 0 for historical rows written before migration 017
+	// (NOT NULL DEFAULT 0). The historial renders the "Sin ubicación: A → N"
+	// row only when at least one of these differs OR the row is a
+	// `rescate_sin_ubicacion` event (so the bucket delta is observable).
+	stock_sin_ubicacion_anterior: number;
+	stock_sin_ubicacion_nuevo: number;
 }
 
 export interface MovimientoListResponse {

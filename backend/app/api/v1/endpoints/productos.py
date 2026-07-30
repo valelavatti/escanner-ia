@@ -99,23 +99,27 @@ async def get_producto_stock_total(
     """Return the total stock of a product broken down into physical + bucket.
 
     Per spec REQ-X-002 + REQ-B-009, the displayed ``stock_total`` (the
-    "stock general" the user sees) is the sum of physical ubicaciones stock
-    (incl. Suelto movimiento sums) PLUS the ``stock_sin_ubicacion`` bucket
-    qty for the product. The ``stock_sin_ubicacion`` field surfaces the
-    bucket qty separately so the frontend can render the 3-stock breakdown
-    without a second round-trip (Slice 6 / Frontend Point 4).
+    "stock general" the user sees) is the sum of physical ubicaciones
+    stock (incl. Suelto movimiento sums) PLUS the
+    ``stock_sin_ubicacion`` bucket qty for the product. The
+    ``stock_sin_ubicacion`` field surfaces the bucket qty separately so
+    the frontend can render the 3-stock breakdown without a second
+    round-trip (Slice 6 / Frontend Point 4).
 
-    ``movimiento_repository.get_producto_stock_total`` returns physical +
-    Suelto only (the bucket is a separate flow); this endpoint ADDS the
-    bucket qty here so the ``stock_total`` invariant (REQ-B-009) holds at
-    the API boundary.
+    Slice 8 — Bug 1 fix: ``movimiento_repository.get_producto_stock_total``
+    now ALREADY includes the bucket qty on its own (was physical + Suelto
+    only before). This endpoint therefore NO LONGER ADDS the bucket qty
+    on top — the previous ``physical + bucket`` formula would have
+    double-counted after the Slice 8 fix in the repository. The invariant
+    ``stock_total = physical + Suelto + bucket`` holds because the
+    repository's ``get_producto_stock_total`` now covers all three.
     """
     if sku:
-        physical = await movimiento_repository.get_producto_stock_total(db, sku)
+        stock_total = await movimiento_repository.get_producto_stock_total(db, sku)
         bucket = await stock_sin_ubicacion_repository.get_cantidad(db, sku)
         return ProductoStockTotal(
             sku=sku,
-            stock_total=physical + bucket,
+            stock_total=stock_total,
             stock_sin_ubicacion=bucket,
         )
 
@@ -125,11 +129,11 @@ async def get_producto_stock_total(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Producto no encontrado",
         )
-    physical = await movimiento_repository.get_producto_stock_total(db, row["sku"])
+    stock_total = await movimiento_repository.get_producto_stock_total(db, row["sku"])
     bucket = await stock_sin_ubicacion_repository.get_cantidad(db, row["sku"])
     return ProductoStockTotal(
         sku=row["sku"],
-        stock_total=physical + bucket,
+        stock_total=stock_total,
         stock_sin_ubicacion=bucket,
     )
 

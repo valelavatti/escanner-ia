@@ -57,17 +57,19 @@ UNIQUE index on ``estantes.nombre`` and the UNIQUE on
 
 Carry-forward #3 from prior slices: each test creates ONE shared
 ``estante_id`` via :func:`estante_factory` and uses distinct
-``(fila, columna)`` per :func:`ubicacion_factory` call. Carry-forward #1:
-:func:`movimiento_repository.get_producto_stock_total` returns
-PHYSICAL + Suelto sum ONLY (NOT bucket), so the snapshot
-``stock_general_anterior`` of the OLD product at reassign time reflects
-its physical stock at U1 (which is 10 immediately before the cell is
-overwritten).
+``(fila, columna)`` per :func:`ubicacion_factory` call. Carry-forward #1
+(REVISED by Slice 8 Bug 1 fix):
+:func:`movimiento_repository.get_producto_stock_total` now returns
+PHYSICAL + Suelto + bucket (was PHYSICAL + Suelto ONLY pre-Slice-8), so
+this slice's ``stock_general_nuevo`` for the OUTGOING product reflects
+the post-reassign 3-stock total (= 0 physical at any cell + 10 in P's
+bucket = 10), and the displayed ``Stock general`` invariant at the API
+boundary is honest without a final endpoint-side bucket offset.
 
 Spec anchors: REQ-B-002 (UPSERT to bucket for the OUTGOING product),
 REQ-B-003 (audit mis-attribution fix — OLD product's snapshot, not NEW),
 REQ-B-009 (stock_general invariant: physical + bucket == stock_general
-for the OLD product after reassign), REQ-X-006 (slice-7 follow-up
+for the OUTGOING product after reassign), REQ-X-006 (slice-7 follow-up
 scenario B7).
 """
 
@@ -205,15 +207,16 @@ class TestScannerReassignMovesOutgoingProductToBucket:
         assert await _bucket_qty(db_session, p) == 10
         assert await _bucket_qty(db_session, q) == 0
 
-        # REQ-B-009 invariant at the OLD product: stock_general(P) as
-        # reported by get_producto_stock_total (physical + Suelto only,
-        # per carry-forward #1) is now 0 — P has no physical cell anymore.
-        # The 10 units live ONLY in the bucket — which is the expected
-        # OUT-of-stock_general state (out of physical = in bucket pending
-        # rescue). When Slice 6 Phase C's endpoint logic adds the bucket
-        # qty back at the API boundary, the displayed stock_total(P) is
-        # 0 + 10 = 10 (the user-visible conservation).
-        assert await _mov_repo.get_producto_stock_total(db_session, p) == 0
+        # REQ-B-009 invariant at the OLD product AFTER Slice 8 Bug 1 fix:
+        # stock_general(P) = physical (0 — P has no cell anymore) +
+        # bucket (10 — P's units UPSERTed into its bucket by reassign) = 10
+        # (the user-visible conservation). The 10 units live ONLY in the
+        # bucket, and Slice 8 folded the bucket into `get_producto_stock_total`
+        # (was PHYSICAL+Suelto only pre-Slice-8 → 0). The displayed
+        # `stock_total` on the FE is now 10 without an implicit endpoint-side
+        # bucket offset — the bug report's "Stock general: 0 → 25" lie at
+        # the historial is the kind of issue this fix clears going forward.
+        assert await _mov_repo.get_producto_stock_total(db_session, p) == 10
         assert await _mov_repo.get_producto_stock_total(db_session, q) == 5
 
     async def test_b7_desasignacion_audit_row_has_conservation_snapshots(
@@ -368,9 +371,12 @@ class TestScannerReassignEdgeQtyZeroStillMovesOutgoingProductToBucket:
         assert await _bucket_qty(db_session, p) == 10
         assert await _bucket_qty(db_session, q) == 0
 
-        # P's physical+U1 stock_general is now 0 (all in bucket — same
-        # state as B7 main, just reached via a qty=0 alta).
-        assert await _mov_repo.get_producto_stock_total(db_session, p) == 0
+        # P's post-reassign stock_general AFTER Slice 8 Bug 1 fix:
+        # physical=0 (all in bucket) + bucket=10 → 10. Pre-Slice-8 this
+        # returned 0 (physical-only); the fix folds the bucket in here
+        # so the user sees the conservation-inclusive diagonal on the
+        # FE historial. Q has 0 physical + 0 bucket = 0.
+        assert await _mov_repo.get_producto_stock_total(db_session, p) == 10
         assert await _mov_repo.get_producto_stock_total(db_session, q) == 0
 
         # P's desasignacion row ALSO exists under the edge case (the

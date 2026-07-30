@@ -29,6 +29,7 @@ MIGRATIONS: list[tuple[int, str, str]] = [
     (14, "estante_nombre_partial_unique", _load_migration("014_estante_nombre_partial_unique.sql")),
     (15, "stock_sin_ubicacion_table", _load_migration("015_stock_sin_ubicacion_table.sql")),
     (16, "extend_movimientos_tipos", _load_migration("016_extend_movimientos_tipos.sql")),
+    (17, "stock_sin_ubicacion_columns", _load_migration("017_movimientos_stock_sin_ubicacion_columns.sql")),
 ]
 
 

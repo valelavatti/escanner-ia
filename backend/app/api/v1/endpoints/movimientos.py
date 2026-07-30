@@ -46,6 +46,12 @@ def _movimiento_response(row: dict) -> MovimientoResponse:
         tipo=row["tipo"],
         stock_general_anterior=row.get("stock_general_anterior", 0),
         stock_general_nuevo=row.get("stock_general_nuevo", 0),
+        # Slice 8 — new bucket-delta snapshots exposed in the response shape
+        # (the columns are NOT NULL DEFAULT 0 via migration 017, so missing
+        # keys gracefully fall back to 0 for any legacy row that did not yet
+        # pass through a Slice 8-aware reader/writer).
+        stock_sin_ubicacion_anterior=row.get("stock_sin_ubicacion_anterior", 0),
+        stock_sin_ubicacion_nuevo=row.get("stock_sin_ubicacion_nuevo", 0),
     )
 
 
@@ -97,6 +103,11 @@ async def create_movimiento(
             ubicacion_id=data.ubicacion_id,
             cantidad=data.cantidad,
             tipo=data.tipo,
+            # Slice 8 — pass the explicit `drain_bucket_qty` (Feature) from the
+            # request body (defaults to 0 in the schema). The repository's
+            # `_create_movimiento_once` validates it against the available
+            # bucket qty AND against `cantidad`; raises ValueError → 400 below.
+            drain_bucket_qty=data.drain_bucket_qty,
         )
     except movimiento_repository.ProductoNotFoundError as exc:
         raise HTTPException(
@@ -112,6 +123,18 @@ async def create_movimiento(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="El stock no puede ser negativo",
+        )
+    except ValueError as exc:
+        # Slice 8 — `drain_bucket_qty` contract violations raised by
+        # `_create_movimiento_once` (insufficient bucket qty OR drain >
+        # declared `cantidad` OR negative drain) surface as the spec-defined
+        # ValueError → HTTP 400 with the validator's explanatory message so
+        # the FE can render the validation error to the operator. Per the
+        # SQLite skill: no SQL internals leak from these messages (the
+        # validator raises explicit Spanish strings, not raw driver errors).
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc) or "Parámetros de movimiento inválidos",
         )
     except movimiento_repository.DatabaseBusyError:
         raise HTTPException(
