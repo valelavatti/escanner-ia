@@ -13,6 +13,18 @@
       "skillPath": "skills/sqlite/SKILL.md",
       "computedHash": "515e1971f145631025485c6dbf83c62bb7ee0fabc805d0e2bd07ac2aac7f24d8"
     },
+    "business-model": {
+      "source": "phuryn/pm-skills",
+      "sourceType": "github",
+      "skillPath": "pm-product-strategy/skills/business-model/SKILL.md",
+      "computedHash": "bedee52fe485016e2810ec4327ea0282679fb4a6bf20603b393f6ee867f2b810"
+    },
+    "docx": {
+      "source": "anthropics/skills",
+      "sourceType": "github",
+      "skillPath": "skills/docx/SKILL.md",
+      "computedHash": "3b8f8cf1ca7a427607c78312655e95e21b5f8f2b06a1aad4dc5554cc90eb095c"
+    },
     "fastapi-templates": {
       "source": "wshobson/agents",
       "sourceType": "github",
@@ -36,6 +48,18 @@
       "sourceType": "github",
       "skillPath": "plugins/svelte-skills/skills/sveltekit-structure/SKILL.md",
       "computedHash": "9d39127b632fc26b5d8e6cd64131d6f131dbf26b0574dc6482b10d8a3276ee07"
+    },
+    "validate-idea": {
+      "source": "slavingia/skills",
+      "sourceType": "github",
+      "skillPath": "skills/validate-idea/SKILL.md",
+      "computedHash": "459f6c6347decb5ed2591be06af3665ad3ae8329cb943bfbb122518f58e80c8c"
+    },
+    "yc-pitch-deck": {
+      "source": "guia-matthieu/clawfu-skills",
+      "sourceType": "github",
+      "skillPath": "skills/startup/yc-pitch-deck/SKILL.md",
+      "computedHash": "2f388c01b4187a6a93ccacd80ca7b953cb27ec22705e9c84a09f25a0f0f3a2f8"
     }
   }
 }
