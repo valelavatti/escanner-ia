@@ -11,7 +11,7 @@
 		const path = $page.url.pathname;
 		const hasSession = !!$sessionStore;
 
-		if (!hasSession && path !== '/login') {
+		if (!hasSession && path !== '/login' && path !== '/mockups') {
 			goto('/login');
 		}
 
