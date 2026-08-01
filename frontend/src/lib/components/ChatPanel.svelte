@@ -2,11 +2,15 @@
 	import { fly, fade } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
 
+	// ── Types ────────────────────────────────────────────────────────────────────
+
+	type OutcomeKind = 'correct' | 'incorrect';
+
 	interface Message {
 		id: number;
-		role: 'user' | 'assistant';
+		role: 'user' | 'assistant' | 'outcome';
 		content: string;
-		outcome?: 'correct' | 'incorrect';
+		outcome?: OutcomeKind;
 		timestamp: Date;
 	}
 
@@ -22,9 +26,13 @@
 
 	let { onClose, context = {} }: Props = $props();
 
+	// ── Config ───────────────────────────────────────────────────────────────────
+
 	const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY ?? '';
 	const MODEL = 'gemini-2.0-flash';
 	const MAX_HISTORY_TURNS = 10;
+
+	// ── State ────────────────────────────────────────────────────────────────────
 
 	let msgId = 0;
 
@@ -33,38 +41,83 @@
 			id: msgId++,
 			role: 'assistant',
 			content: context.sku
-				? `Producto detectado: ${context.sku}${context.descripcion ? ` — ${context.descripcion}` : ''}. ¿En qué te ayudo?`
-				: 'Listo. Podés preguntarme dónde encontrar un producto, confirmar una ubicación, o usá los botones para registrar el resultado del escaneo.',
+				? `Producto detectado: **${context.sku}**${context.descripcion ? ` — ${context.descripcion}` : ''}.\nUsá los botones para registrar el resultado del escaneo, o haceme una pregunta.`
+				: 'Listo. Usá los botones para registrar el resultado del escaneo, o preguntame sobre un producto o ubicación.',
 			timestamp: new Date()
 		}
 	]);
 
+	type AiStatus = 'idle' | 'thinking' | 'speaking';
+
+	let status = $state<AiStatus>('idle');
 	let input = $state('');
-	let loading = $state(false);
 	let muted = $state(false);
-	let isSpeaking = $state(false);
 	let messagesEl: HTMLElement | undefined = $state(undefined);
 
-	// Waveform bars heights (animated when speaking)
-	let waveHeights = $state([3, 5, 8, 5, 3, 7, 12, 7, 3, 5, 8, 5, 3]);
+	// Speech synthesis
+	let currentUtterance: SpeechSynthesisUtterance | null = null;
 
+	// Waveform
+	let waveHeights = $state<number[]>(Array.from({ length: 18 }, () => 4));
 	let waveInterval: ReturnType<typeof setInterval> | null = null;
 
+	// ── Derived context chips ────────────────────────────────────────────────────
+
+	let contextChips = $derived(
+		[
+			context.sku ? { label: context.sku, color: 'blue' as const } : null,
+			context.ubicacion ? { label: context.ubicacion, color: 'green' as const } : null
+		].filter(Boolean) as { label: string; color: 'blue' | 'green' }[]
+	);
+
+	// ── Audio helpers ─────────────────────────────────────────────────────────────
+
 	function startWave() {
-		isSpeaking = true;
+		status = 'speaking';
 		waveInterval = setInterval(() => {
-			waveHeights = waveHeights.map(() => 3 + Math.random() * 20);
-		}, 120);
+			waveHeights = Array.from({ length: 18 }, () => 4 + Math.random() * 22);
+		}, 110);
 	}
 
 	function stopWave() {
-		isSpeaking = false;
+		status = 'idle';
 		if (waveInterval) {
 			clearInterval(waveInterval);
 			waveInterval = null;
 		}
-		waveHeights = [3, 5, 8, 5, 3, 7, 12, 7, 3, 5, 8, 5, 3];
+		waveHeights = Array.from({ length: 18 }, () => 4);
 	}
+
+	function speak(text: string) {
+		if (muted || typeof window === 'undefined') return;
+
+		window.speechSynthesis.cancel();
+		const utterance = new SpeechSynthesisUtterance(text);
+		utterance.lang = 'es-AR';
+		utterance.rate = 1.05;
+		utterance.pitch = 1;
+
+		// Pick a Spanish voice if available
+		const voices = window.speechSynthesis.getVoices();
+		const esVoice = voices.find(
+			(v) => v.lang.startsWith('es') && !v.name.toLowerCase().includes('compact')
+		);
+		if (esVoice) utterance.voice = esVoice;
+
+		utterance.onstart = startWave;
+		utterance.onend = stopWave;
+		utterance.onerror = stopWave;
+
+		currentUtterance = utterance;
+		window.speechSynthesis.speak(utterance);
+	}
+
+	function stopSpeaking() {
+		if (typeof window !== 'undefined') window.speechSynthesis.cancel();
+		stopWave();
+	}
+
+	// ── System prompt ─────────────────────────────────────────────────────────────
 
 	function buildSystemPrompt(): string {
 		const lines = [
@@ -74,797 +127,716 @@
 			'Tu objetivo es ayudarlo a encontrar o almacenar el producto de la forma más rápida posible.',
 			'Nunca inventés datos. Si no tenés información, decilo en una oración.',
 			'Respondés en máximo 2 oraciones. Priorizá claridad sobre completitud.',
-			'Si el operario reporta un error, dá pasos específicos y numerados.'
+			'Si el operario reporta un error, dá pasos específicos y concretos.'
 		];
-		if (context.sku)
-			lines.push(
-				`Producto activo: SKU ${context.sku}${context.descripcion ? ` — ${context.descripcion}` : ''}.`
-			);
+
+		if (context.sku) lines.push(`Producto escaneado actualmente: SKU ${context.sku}.`);
+		if (context.descripcion) lines.push(`Descripción: ${context.descripcion}.`);
 		if (context.ubicacion) lines.push(`Ubicación anclada: ${context.ubicacion}.`);
-		if (context.deposito) lines.push(`Depósito activo: ${context.deposito}.`);
+		if (context.deposito) lines.push(`Depósito asignado: ${context.deposito}.`);
+
 		return lines.join('\n');
 	}
 
-	function speak(text: string) {
-		if (muted || !('speechSynthesis' in window)) return;
-		window.speechSynthesis.cancel();
-		const utterance = new SpeechSynthesisUtterance(text);
-		utterance.lang = 'es-AR';
-		utterance.rate = 1.05;
-		utterance.onstart = () => startWave();
-		utterance.onend = () => stopWave();
-		utterance.onerror = () => stopWave();
-		window.speechSynthesis.speak(utterance);
-	}
+	// ── Gemini call ───────────────────────────────────────────────────────────────
 
-	async function sendToGemini(userMessage: string): Promise<string> {
-		const systemPrompt = buildSystemPrompt();
-		const historyMessages = messages
-			.filter((m) => !m.outcome)
-			.slice(-MAX_HISTORY_TURNS * 2);
+	async function callGemini(userText: string): Promise<string> {
+		const history = messages.slice(-MAX_HISTORY_TURNS * 2);
 
-		const geminiContents = historyMessages.map((m) => ({
-			role: m.role === 'assistant' ? 'model' : 'user',
-			parts: [{ text: m.content }]
-		}));
-		geminiContents.push({ role: 'user', parts: [{ text: userMessage }] });
+		const geminiHistory = history
+			.filter((m) => m.role === 'user' || m.role === 'assistant')
+			.map((m) => ({
+				role: m.role === 'user' ? 'user' : 'model',
+				parts: [{ text: m.content }]
+			}));
 
-		const body = {
-			system_instruction: { parts: [{ text: systemPrompt }] },
-			contents: geminiContents,
-			generationConfig: { temperature: 0.35, maxOutputTokens: 200 }
+		const payload = {
+			system_instruction: { parts: [{ text: buildSystemPrompt() }] },
+			contents: [
+				...geminiHistory,
+				{ role: 'user', parts: [{ text: userText }] }
+			],
+			generationConfig: {
+				temperature: 0.3,
+				maxOutputTokens: 120
+			}
 		};
 
-		const res = await fetch(
-			`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${GEMINI_API_KEY}`,
-			{
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify(body)
-			}
-		);
+		const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+
+		const res = await fetch(url, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(payload)
+		});
 
 		if (!res.ok) {
-			const err = await res.text();
-			throw new Error(`Gemini error ${res.status}: ${err}`);
+			const err = await res.json().catch(() => ({}));
+			throw new Error(err?.error?.message ?? `HTTP ${res.status}`);
 		}
+
 		const data = await res.json();
-		return data.candidates?.[0]?.content?.parts?.[0]?.text ?? 'Sin respuesta del modelo.';
+		return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? '(Sin respuesta)';
 	}
 
-	function pushMessage(msg: Omit<Message, 'id' | 'timestamp'>) {
-		messages = [...messages, { ...msg, id: msgId++, timestamp: new Date() }];
+	// ── Send message ──────────────────────────────────────────────────────────────
+
+	async function sendMessage(text: string) {
+		const trimmed = text.trim();
+		if (!trimmed || status === 'thinking') return;
+
+		messages = [
+			...messages,
+			{ id: msgId++, role: 'user', content: trimmed, timestamp: new Date() }
+		];
+		input = '';
+		status = 'thinking';
+
+		scrollToBottom();
+
+		try {
+			const reply = await callGemini(trimmed);
+			messages = [
+				...messages,
+				{ id: msgId++, role: 'assistant', content: reply, timestamp: new Date() }
+			];
+			speak(reply);
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : 'Error al consultar la IA.';
+			messages = [
+				...messages,
+				{ id: msgId++, role: 'assistant', content: `Error: ${msg}`, timestamp: new Date() }
+			];
+			status = 'idle';
+		}
+
 		scrollToBottom();
 	}
 
-	async function handleSend(text: string) {
-		if (!text.trim() || loading) return;
-		pushMessage({ role: 'user', content: text });
-		input = '';
-		loading = true;
-		try {
-			const reply = await sendToGemini(text);
-			pushMessage({ role: 'assistant', content: reply });
-			speak(reply);
-		} catch {
-			pushMessage({
-				role: 'assistant',
-				content: 'No se pudo conectar con el asistente. Verificá la clave de API.'
-			});
-		} finally {
-			loading = false;
-		}
-	}
+	// ── Outcome buttons ───────────────────────────────────────────────────────────
 
-	async function handleOutcome(outcome: 'correct' | 'incorrect') {
-		if (loading) return;
+	async function handleOutcome(kind: OutcomeKind) {
 		const label =
-			outcome === 'correct'
-				? 'Escaneo registrado como correcto.'
-				: 'Escaneo registrado como incorrecto.';
-		const prompt =
-			outcome === 'correct'
-				? 'El operario confirmó que el escaneo fue correcto. Dá una confirmación muy breve y positiva.'
-				: 'El operario reportó que el escaneo fue incorrecto. Dá los pasos específicos para corregirlo.';
+			kind === 'correct'
+				? 'Escaneo correcto'
+				: 'Escaneo incorrecto';
 
-		pushMessage({ role: 'user', content: label, outcome });
-		loading = true;
+		messages = [
+			...messages,
+			{ id: msgId++, role: 'outcome', content: label, outcome: kind, timestamp: new Date() }
+		];
+
+		const prompt =
+			kind === 'correct'
+				? `El operario confirmó que el escaneo fue correcto.${context.sku ? ` Producto: ${context.sku}.` : ''} Dá una confirmación breve y motivadora.`
+				: `El operario reportó un escaneo incorrecto.${context.sku ? ` Producto esperado: ${context.sku}.` : ''} Guialo en 1-2 pasos concretos para corregirlo.`;
+
+		status = 'thinking';
+		scrollToBottom();
+
 		try {
-			const reply = await sendToGemini(prompt);
-			pushMessage({ role: 'assistant', content: reply });
+			const reply = await callGemini(prompt);
+			messages = [
+				...messages,
+				{ id: msgId++, role: 'assistant', content: reply, timestamp: new Date() }
+			];
 			speak(reply);
 		} catch {
-			pushMessage({ role: 'assistant', content: 'Error al conectar con el asistente.' });
-		} finally {
-			loading = false;
+			status = 'idle';
 		}
+
+		scrollToBottom();
 	}
 
-	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === 'Enter' && !e.nativeEvent?.isComposing && e.keyCode !== 229) {
-			e.preventDefault();
-			handleSend(input);
-		}
-	}
+	// ── Scroll ────────────────────────────────────────────────────────────────────
 
 	function scrollToBottom() {
-		requestAnimationFrame(() => {
-			if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
-		});
-	}
-
-	function toggleMute() {
-		muted = !muted;
-		if (muted) {
-			window.speechSynthesis?.cancel();
-			stopWave();
+		if (messagesEl) {
+			setTimeout(() => {
+				if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
+			}, 60);
 		}
 	}
 
-	function formatTime(d: Date): string {
-		return d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+	// ── Keyboard ──────────────────────────────────────────────────────────────────
+
+	function handleKeydown(e: KeyboardEvent) {
+		if (e.key === 'Enter' && !e.nativeEvent?.isComposing && !(e as any).isComposing) {
+			sendMessage(input);
+		}
 	}
 </script>
 
-<div
-	class="cp"
-	role="dialog"
-	aria-modal="true"
+<aside
+	class="chat-panel"
+	role="complementary"
 	aria-label="Asistente IA de depósito"
-	transition:fly={{ y: '100%', duration: 320, easing: cubicOut }}
+	transition:fly={{ y: '100%', duration: 380, easing: cubicOut }}
 >
-	<!-- Drag handle -->
-	<div class="cp__handle" aria-hidden="true"></div>
-
-	<!-- Header -->
-	<header class="cp__header">
-		<div class="cp__header-brand">
-			<!-- AI orb with pulse when loading/speaking -->
-			<div class="cp__orb" class:cp__orb--active={loading || isSpeaking} aria-hidden="true">
-				<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-					<path
-						d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"
-						fill="currentColor"
-						opacity="0.3"
-					/>
-					<circle cx="12" cy="12" r="4" fill="currentColor" />
-				</svg>
+	<!-- ── Header ─────────────────────────────────────────────────────────────── -->
+	<header class="chat-panel__header">
+		<div class="chat-panel__header-left">
+			<div class="chat-panel__orb" class:chat-panel__orb--thinking={status === 'thinking'} class:chat-panel__orb--speaking={status === 'speaking'}>
+				{#if status === 'thinking'}
+					<span class="chat-panel__dots" aria-hidden="true">
+						<span></span><span></span><span></span>
+					</span>
+				{:else if status === 'speaking'}
+					<div class="chat-panel__waveform" aria-hidden="true">
+						{#each waveHeights as h}
+							<span class="chat-panel__bar" style="height:{h}px"></span>
+						{/each}
+					</div>
+				{:else}
+					<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+						<path d="M12 2a3 3 0 0 1 3 3v7a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3z"/>
+						<path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+						<line x1="12" y1="19" x2="12" y2="22"/>
+					</svg>
+				{/if}
 			</div>
-			<div>
-				<div class="cp__title">Asistente IA</div>
-				<div class="cp__subtitle">
-					{#if loading}
-						<span class="cp__status-dot cp__status-dot--loading"></span>
-						Procesando...
-					{:else if isSpeaking}
-						<span class="cp__status-dot cp__status-dot--speaking"></span>
-						Hablando...
+
+			<div class="chat-panel__header-info">
+				<span class="chat-panel__title">InvenTIA</span>
+				<span class="chat-panel__status-label">
+					{#if status === 'thinking'}
+						Pensando...
+					{:else if status === 'speaking'}
+						Hablando
 					{:else}
-						<span class="cp__status-dot cp__status-dot--ready"></span>
 						Listo
 					{/if}
-				</div>
+				</span>
 			</div>
 		</div>
 
-		<div class="cp__header-actions">
-			<!-- Waveform (visible while speaking) -->
-			{#if isSpeaking}
-				<div class="cp__waveform" aria-hidden="true" transition:fade={{ duration: 200 }}>
-					{#each waveHeights as h}
-						<span class="cp__wave-bar" style="height: {h}px;"></span>
-					{/each}
-				</div>
-			{/if}
-
+		<div class="chat-panel__header-right">
 			<button
 				type="button"
-				class="cp__icon-btn"
-				class:cp__icon-btn--muted={muted}
-				onclick={toggleMute}
-				aria-label={muted ? 'Activar voz' : 'Silenciar voz'}
+				class="chat-panel__icon-btn"
+				onclick={() => { muted = !muted; if (muted) stopSpeaking(); }}
+				title={muted ? 'Activar voz' : 'Silenciar'}
+				aria-label={muted ? 'Activar voz' : 'Silenciar'}
 			>
 				{#if muted}
-					<!-- mic-off -->
-					<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-						<line x1="1" y1="1" x2="23" y2="23" />
-						<path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" />
-						<path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23" />
-						<line x1="12" y1="19" x2="12" y2="23" />
-						<line x1="8" y1="23" x2="16" y2="23" />
-					</svg>
+					<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="1" y1="1" x2="23" y2="23"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
 				{:else}
-					<!-- mic -->
-					<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-						<path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-						<path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-						<line x1="12" y1="19" x2="12" y2="23" />
-						<line x1="8" y1="23" x2="16" y2="23" />
-					</svg>
+					<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 1 3 3v7a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
 				{/if}
 			</button>
 
-			<button type="button" class="cp__icon-btn" onclick={onClose} aria-label="Cerrar asistente">
-				<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-					<line x1="18" y1="6" x2="6" y2="18" />
-					<line x1="6" y1="6" x2="18" y2="18" />
-				</svg>
+			<button
+				type="button"
+				class="chat-panel__icon-btn chat-panel__icon-btn--close"
+				onclick={onClose}
+				aria-label="Cerrar asistente"
+			>
+				<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
 			</button>
 		</div>
 	</header>
 
-	<!-- Context chip strip -->
-	{#if context.sku || context.ubicacion}
-		<div class="cp__chips">
-			{#if context.sku}
-				<span class="cp__chip cp__chip--sku">
-					<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-						<path d="M3 5h18v14H3V5zm2 2v10h14V7H5zm2 2h10v2H7V9zm0 4h6v2H7v-2z" />
-					</svg>
-					{context.sku}
+	<!-- ── Context chips ──────────────────────────────────────────────────────── -->
+	{#if contextChips.length > 0}
+		<div class="chat-panel__chips" role="list" aria-label="Contexto activo">
+			{#each contextChips as chip}
+				<span class="chat-panel__chip chat-panel__chip--{chip.color}" role="listitem">
+					{chip.label}
 				</span>
-			{/if}
-			{#if context.ubicacion}
-				<span class="cp__chip cp__chip--location">
-					<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-						<path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" />
-					</svg>
-					{context.ubicacion}
-				</span>
-			{/if}
+			{/each}
 		</div>
 	{/if}
 
-	<!-- Outcome buttons — large, thumb-friendly -->
-	<div class="cp__outcomes">
+	<!-- ── Outcome buttons ────────────────────────────────────────────────────── -->
+	<div class="chat-panel__outcomes" role="group" aria-label="Resultado del escaneo">
 		<button
 			type="button"
-			class="cp__outcome cp__outcome--correct"
-			onclick={() => handleOutcome('correct')}
-			disabled={loading}
-			aria-label="Registrar escaneo correcto"
-		>
-			<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-				<polyline points="20 6 9 17 4 12" />
-			</svg>
-			<span>Correcto</span>
-		</button>
-		<button
-			type="button"
-			class="cp__outcome cp__outcome--incorrect"
+			class="chat-panel__outcome-btn chat-panel__outcome-btn--incorrect"
 			onclick={() => handleOutcome('incorrect')}
-			disabled={loading}
+			disabled={status === 'thinking'}
 			aria-label="Registrar escaneo incorrecto"
 		>
-			<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-				<line x1="18" y1="6" x2="6" y2="18" />
-				<line x1="6" y1="6" x2="18" y2="18" />
-			</svg>
+			<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
 			<span>Incorrecto</span>
+		</button>
+
+		<button
+			type="button"
+			class="chat-panel__outcome-btn chat-panel__outcome-btn--correct"
+			onclick={() => handleOutcome('correct')}
+			disabled={status === 'thinking'}
+			aria-label="Registrar escaneo correcto"
+		>
+			<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+			<span>Correcto</span>
 		</button>
 	</div>
 
-	<!-- Messages -->
-	<div class="cp__messages" bind:this={messagesEl} aria-live="polite" aria-label="Conversación">
+	<!-- ── Messages ──────────────────────────────────────────────────────────── -->
+	<div class="chat-panel__messages" bind:this={messagesEl} role="log" aria-live="polite" aria-label="Conversación con el asistente">
 		{#each messages as msg (msg.id)}
-			<div
-				class="cp__msg"
-				class:cp__msg--user={msg.role === 'user'}
-				class:cp__msg--ai={msg.role === 'assistant'}
-				class:cp__msg--outcome-correct={msg.outcome === 'correct'}
-				class:cp__msg--outcome-incorrect={msg.outcome === 'incorrect'}
-				transition:fly={{ y: 10, duration: 220, easing: cubicOut }}
-			>
-				{#if msg.role === 'assistant'}
-					<div class="cp__msg-avatar" aria-hidden="true">IA</div>
-				{/if}
-				<div class="cp__msg-body">
-					<p class="cp__msg-text">{msg.content}</p>
-					<time class="cp__msg-time" datetime={msg.timestamp.toISOString()}>
-						{formatTime(msg.timestamp)}
+			{#if msg.role === 'outcome'}
+				<div
+					class="chat-panel__outcome-pill chat-panel__outcome-pill--{msg.outcome}"
+					transition:fade={{ duration: 180 }}
+					role="status"
+				>
+					{msg.outcome === 'correct'
+						? '✓ Escaneo correcto registrado'
+						: '✗ Escaneo incorrecto registrado'}
+				</div>
+			{:else}
+				<div
+					class="chat-panel__bubble chat-panel__bubble--{msg.role}"
+					transition:fly={{ y: 10, duration: 220, easing: cubicOut }}
+				>
+					<p class="chat-panel__bubble-text">{msg.content}</p>
+					<time
+						class="chat-panel__bubble-time"
+						datetime={msg.timestamp.toISOString()}
+					>
+						{msg.timestamp.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
 					</time>
 				</div>
-			</div>
+			{/if}
 		{/each}
 
-		{#if loading}
-			<div
-				class="cp__msg cp__msg--ai"
-				aria-label="El asistente está procesando"
-				transition:fade={{ duration: 150 }}
-			>
-				<div class="cp__msg-avatar" aria-hidden="true">IA</div>
-				<div class="cp__msg-body">
-					<div class="cp__dots">
-						<span></span><span></span><span></span>
-					</div>
-				</div>
+		{#if status === 'thinking'}
+			<div class="chat-panel__typing" transition:fade={{ duration: 150 }} aria-label="El asistente está escribiendo">
+				<span></span><span></span><span></span>
 			</div>
 		{/if}
 	</div>
 
-	<!-- Input row -->
-	<div class="cp__input-row">
+	<!-- ── Input ──────────────────────────────────────────────────────────────── -->
+	<div class="chat-panel__input-row">
 		<input
 			type="text"
-			class="cp__input"
-			placeholder="Escribí una pregunta..."
+			class="chat-panel__input"
 			bind:value={input}
 			onkeydown={handleKeydown}
-			disabled={loading}
-			aria-label="Mensaje al asistente"
+			placeholder="Preguntá algo..."
 			autocomplete="off"
-			autocorrect="off"
-			spellcheck="false"
+			spellcheck={false}
+			disabled={status === 'thinking'}
+			aria-label="Mensaje para el asistente"
 		/>
 		<button
 			type="button"
-			class="cp__send"
-			onclick={() => handleSend(input)}
-			disabled={loading || !input.trim()}
-			aria-label="Enviar"
+			class="chat-panel__send-btn"
+			onclick={() => sendMessage(input)}
+			disabled={!input.trim() || status === 'thinking'}
+			aria-label="Enviar mensaje"
 		>
-			<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-				<line x1="22" y1="2" x2="11" y2="13" />
-				<polygon points="22 2 15 22 11 13 2 9 22 2" />
-			</svg>
+			<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
 		</button>
 	</div>
-</div>
+</aside>
 
 <style>
-	/* ─── Shell ───────────────────────────────────────────────── */
-	.cp {
+	/* ── Panel shell ────────────────────────────────────────────────────────── */
+	.chat-panel {
 		position: fixed;
+		inset-inline: 0;
 		bottom: 0;
-		left: 0;
-		right: 0;
 		height: 76dvh;
 		display: flex;
 		flex-direction: column;
 		background: #090e1a;
-		border-top: 1px solid rgba(255, 255, 255, 0.07);
+		border-top: 1px solid rgba(255, 255, 255, 0.08);
 		border-radius: 1.25rem 1.25rem 0 0;
+		box-shadow: 0 -24px 64px rgba(0, 0, 0, 0.65);
 		z-index: 100;
 		overflow: hidden;
-		box-shadow: 0 -24px 64px rgba(0, 0, 0, 0.6);
+		/* safe area for notch phones */
+		padding-bottom: env(safe-area-inset-bottom, 0px);
 	}
 
-	/* ─── Drag handle ─────────────────────────────────────────── */
-	.cp__handle {
-		width: 2.5rem;
-		height: 0.25rem;
-		background: rgba(255, 255, 255, 0.15);
-		border-radius: 99px;
-		margin: 0.625rem auto 0;
-		flex-shrink: 0;
-	}
-
-	/* ─── Header ──────────────────────────────────────────────── */
-	.cp__header {
+	/* ── Header ─────────────────────────────────────────────────────────────── */
+	.chat-panel__header {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		padding: 0.875rem 1.125rem 0.75rem;
+		padding: 1rem 1.125rem 0.75rem;
+		border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 		flex-shrink: 0;
 	}
 
-	.cp__header-brand {
+	.chat-panel__header-left {
 		display: flex;
 		align-items: center;
 		gap: 0.75rem;
 	}
 
-	/* AI orb */
-	.cp__orb {
-		width: 2.375rem;
-		height: 2.375rem;
+	.chat-panel__header-right {
+		display: flex;
+		align-items: center;
+		gap: 0.375rem;
+	}
+
+	/* ── Orb ────────────────────────────────────────────────────────────────── */
+	.chat-panel__orb {
+		width: 2.625rem;
+		height: 2.625rem;
 		border-radius: 50%;
-		background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 60%, #3b82f6 100%);
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		color: #fff;
+		background: radial-gradient(circle at 35% 35%, #1d4ed8, #1e3a8a);
+		box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.3), 0 0 20px rgba(37, 99, 235, 0.25);
+		color: #93c5fd;
 		flex-shrink: 0;
-		transition: box-shadow 0.3s ease;
+		transition: background 0.4s, box-shadow 0.4s;
 	}
 
-	.cp__orb--active {
-		box-shadow:
-			0 0 0 3px rgba(59, 130, 246, 0.25),
-			0 0 16px rgba(59, 130, 246, 0.4);
-		animation: orb-pulse 1.8s ease-in-out infinite;
+	.chat-panel__orb--thinking {
+		background: radial-gradient(circle at 35% 35%, #7c3aed, #4c1d95);
+		box-shadow: 0 0 0 1px rgba(139, 92, 246, 0.4), 0 0 24px rgba(124, 58, 237, 0.35);
+		color: #c4b5fd;
+		animation: orb-pulse 1.4s ease-in-out infinite;
+	}
+
+	.chat-panel__orb--speaking {
+		background: radial-gradient(circle at 35% 35%, #0891b2, #0e7490);
+		box-shadow: 0 0 0 1px rgba(6, 182, 212, 0.4), 0 0 28px rgba(8, 145, 178, 0.4);
+		color: #67e8f9;
 	}
 
 	@keyframes orb-pulse {
-		0%, 100% { box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2), 0 0 12px rgba(59, 130, 246, 0.3); }
-		50% { box-shadow: 0 0 0 6px rgba(59, 130, 246, 0.1), 0 0 28px rgba(59, 130, 246, 0.5); }
+		0%, 100% { transform: scale(1); opacity: 1; }
+		50% { transform: scale(1.06); opacity: 0.85; }
 	}
 
-	.cp__title {
-		font-size: 0.9375rem;
-		font-weight: 700;
-		color: #f8fafc;
-		letter-spacing: -0.01em;
-	}
-
-	.cp__subtitle {
+	.chat-panel__dots {
 		display: flex;
 		align-items: center;
-		gap: 0.3125rem;
-		font-size: 0.75rem;
-		color: #64748b;
-		margin-top: 0.125rem;
+		gap: 3px;
 	}
 
-	/* Status dot */
-	.cp__status-dot {
-		display: inline-block;
-		width: 0.4375rem;
-		height: 0.4375rem;
+	.chat-panel__dots span {
+		width: 5px;
+		height: 5px;
 		border-radius: 50%;
-		flex-shrink: 0;
+		background: currentColor;
+		animation: bounce-dot 1.1s ease-in-out infinite;
 	}
 
-	.cp__status-dot--ready { background: #22c55e; }
-	.cp__status-dot--loading {
-		background: #f59e0b;
-		animation: dot-blink 0.9s ease-in-out infinite;
-	}
-	.cp__status-dot--speaking {
-		background: #3b82f6;
-		animation: dot-blink 0.6s ease-in-out infinite;
+	.chat-panel__dots span:nth-child(2) { animation-delay: 0.16s; }
+	.chat-panel__dots span:nth-child(3) { animation-delay: 0.32s; }
+
+	@keyframes bounce-dot {
+		0%, 80%, 100% { transform: translateY(0); }
+		40% { transform: translateY(-5px); }
 	}
 
-	@keyframes dot-blink {
-		0%, 100% { opacity: 1; }
-		50% { opacity: 0.3; }
-	}
-
-	/* Header actions */
-	.cp__header-actions {
-		display: flex;
-		align-items: center;
-		gap: 0.25rem;
-	}
-
-	/* Waveform */
-	.cp__waveform {
+	.chat-panel__waveform {
 		display: flex;
 		align-items: center;
 		gap: 2px;
 		height: 20px;
-		margin-right: 0.375rem;
 	}
 
-	.cp__wave-bar {
+	.chat-panel__bar {
 		display: block;
 		width: 2px;
-		background: #3b82f6;
+		min-height: 4px;
 		border-radius: 2px;
+		background: currentColor;
 		transition: height 0.1s ease;
-		min-height: 3px;
 	}
 
-	.cp__icon-btn {
+	/* ── Header text ─────────────────────────────────────────────────────────── */
+	.chat-panel__header-info {
 		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 2.25rem;
-		height: 2.25rem;
-		border: none;
-		border-radius: 0.5rem;
-		background: transparent;
-		color: #475569;
-		cursor: pointer;
-		touch-action: manipulation;
-		transition: background 0.15s, color 0.15s;
+		flex-direction: column;
+		gap: 1px;
 	}
 
-	.cp__icon-btn:hover {
-		background: rgba(255, 255, 255, 0.06);
-		color: #cbd5e1;
-	}
-
-	.cp__icon-btn--muted {
-		color: #ef4444;
-	}
-
-	/* ─── Context chips ───────────────────────────────────────── */
-	.cp__chips {
-		display: flex;
-		gap: 0.375rem;
-		padding: 0 1.125rem 0.625rem;
-		flex-shrink: 0;
-		flex-wrap: wrap;
-	}
-
-	.cp__chip {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.3125rem;
-		padding: 0.25rem 0.625rem;
-		border-radius: 99px;
-		font-size: 0.71875rem;
-		font-weight: 600;
+	.chat-panel__title {
+		font-size: 0.9375rem;
+		font-weight: 700;
+		color: #f1f5f9;
 		letter-spacing: 0.01em;
 	}
 
-	.cp__chip--sku {
-		background: rgba(37, 99, 235, 0.15);
-		color: #93c5fd;
-		border: 1px solid rgba(37, 99, 235, 0.3);
-	}
-
-	.cp__chip--location {
-		background: rgba(22, 163, 74, 0.12);
-		color: #86efac;
-		border: 1px solid rgba(22, 163, 74, 0.25);
-	}
-
-	/* ─── Outcome buttons ─────────────────────────────────────── */
-	.cp__outcomes {
-		display: grid;
-		grid-template-columns: 1fr 1fr;
-		gap: 0.5rem;
-		padding: 0 1rem 0.75rem;
-		flex-shrink: 0;
-	}
-
-	.cp__outcome {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		gap: 0.5rem;
-		height: 3.25rem;
-		border: none;
-		border-radius: 0.875rem;
-		font-size: 1rem;
-		font-weight: 700;
-		cursor: pointer;
-		touch-action: manipulation;
-		transition: opacity 0.15s, transform 0.1s, box-shadow 0.15s;
-		letter-spacing: -0.01em;
-	}
-
-	.cp__outcome:disabled {
-		opacity: 0.38;
-		cursor: not-allowed;
-	}
-
-	.cp__outcome:not(:disabled):active {
-		transform: scale(0.96);
-	}
-
-	.cp__outcome--correct {
-		background: #16a34a;
-		color: #fff;
-		box-shadow: 0 4px 14px rgba(22, 163, 74, 0.35);
-	}
-
-	.cp__outcome--correct:not(:disabled):hover {
-		background: #15803d;
-		box-shadow: 0 4px 18px rgba(22, 163, 74, 0.5);
-	}
-
-	.cp__outcome--incorrect {
-		background: #dc2626;
-		color: #fff;
-		box-shadow: 0 4px 14px rgba(220, 38, 38, 0.35);
-	}
-
-	.cp__outcome--incorrect:not(:disabled):hover {
-		background: #b91c1c;
-		box-shadow: 0 4px 18px rgba(220, 38, 38, 0.5);
-	}
-
-	/* ─── Divider ─────────────────────────────────────────────── */
-	.cp__outcomes::after {
-		content: '';
-		display: none;
-	}
-
-	/* ─── Messages ────────────────────────────────────────────── */
-	.cp__messages {
-		flex: 1 1 auto;
-		overflow-y: auto;
-		padding: 0.5rem 1rem 0.75rem;
-		display: flex;
-		flex-direction: column;
-		gap: 0.75rem;
-		border-top: 1px solid rgba(255, 255, 255, 0.05);
-		scroll-behavior: smooth;
-	}
-
-	.cp__messages::-webkit-scrollbar {
-		width: 0.1875rem;
-	}
-
-	.cp__messages::-webkit-scrollbar-track {
-		background: transparent;
-	}
-
-	.cp__messages::-webkit-scrollbar-thumb {
-		background: rgba(255, 255, 255, 0.1);
-		border-radius: 99px;
-	}
-
-	/* Message row */
-	.cp__msg {
-		display: flex;
-		align-items: flex-end;
-		gap: 0.5rem;
-		max-width: 100%;
-	}
-
-	.cp__msg--user {
-		flex-direction: row-reverse;
-	}
-
-	/* AI avatar pill */
-	.cp__msg-avatar {
-		width: 1.625rem;
-		height: 1.625rem;
-		border-radius: 50%;
-		background: linear-gradient(135deg, #1d4ed8, #2563eb);
-		color: #fff;
-		font-size: 0.5625rem;
-		font-weight: 800;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		flex-shrink: 0;
+	.chat-panel__status-label {
+		font-size: 0.75rem;
+		color: #64748b;
 		letter-spacing: 0.02em;
 	}
 
-	/* Bubble body */
-	.cp__msg-body {
+	/* ── Icon buttons ────────────────────────────────────────────────────────── */
+	.chat-panel__icon-btn {
+		width: 2rem;
+		height: 2rem;
+		border-radius: 50%;
+		border: none;
 		display: flex;
-		flex-direction: column;
-		gap: 0.1875rem;
-		max-width: 80%;
+		align-items: center;
+		justify-content: center;
+		background: rgba(255, 255, 255, 0.05);
+		color: #94a3b8;
+		cursor: pointer;
+		transition: background 0.18s, color 0.18s;
 	}
 
-	.cp__msg--user .cp__msg-body {
+	.chat-panel__icon-btn:hover {
+		background: rgba(255, 255, 255, 0.1);
+		color: #e2e8f0;
+	}
+
+	.chat-panel__icon-btn--close:hover {
+		background: rgba(220, 38, 38, 0.15);
+		color: #f87171;
+	}
+
+	/* ── Context chips ───────────────────────────────────────────────────────── */
+	.chat-panel__chips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.375rem;
+		padding: 0.5rem 1.125rem;
+		flex-shrink: 0;
+	}
+
+	.chat-panel__chip {
+		display: inline-flex;
+		align-items: center;
+		padding: 0.25rem 0.625rem;
+		border-radius: 999px;
+		font-size: 0.75rem;
+		font-weight: 600;
+		letter-spacing: 0.02em;
+	}
+
+	.chat-panel__chip--blue {
+		background: rgba(37, 99, 235, 0.18);
+		color: #93c5fd;
+		border: 1px solid rgba(59, 130, 246, 0.25);
+	}
+
+	.chat-panel__chip--green {
+		background: rgba(22, 163, 74, 0.15);
+		color: #86efac;
+		border: 1px solid rgba(34, 197, 94, 0.22);
+	}
+
+	/* ── Outcome buttons ─────────────────────────────────────────────────────── */
+	.chat-panel__outcomes {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 0.625rem;
+		padding: 0 1.125rem 0.75rem;
+		flex-shrink: 0;
+	}
+
+	.chat-panel__outcome-btn {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 0.5rem;
+		padding: 0.875rem 1rem;
+		border: none;
+		border-radius: 0.75rem;
+		font-size: 1rem;
+		font-weight: 700;
+		cursor: pointer;
+		transition: transform 0.12s, box-shadow 0.18s, opacity 0.15s;
+		touch-action: manipulation;
+		letter-spacing: 0.01em;
+	}
+
+	.chat-panel__outcome-btn:active {
+		transform: scale(0.96);
+	}
+
+	.chat-panel__outcome-btn:disabled {
+		opacity: 0.45;
+		cursor: not-allowed;
+	}
+
+	.chat-panel__outcome-btn--incorrect {
+		background: rgba(220, 38, 38, 0.12);
+		color: #fca5a5;
+		border: 1.5px solid rgba(220, 38, 38, 0.35);
+		box-shadow: 0 0 18px rgba(220, 38, 38, 0.08);
+	}
+
+	.chat-panel__outcome-btn--incorrect:hover:not(:disabled) {
+		background: rgba(220, 38, 38, 0.2);
+		box-shadow: 0 0 24px rgba(220, 38, 38, 0.2);
+	}
+
+	.chat-panel__outcome-btn--correct {
+		background: rgba(22, 163, 74, 0.12);
+		color: #86efac;
+		border: 1.5px solid rgba(22, 163, 74, 0.35);
+		box-shadow: 0 0 18px rgba(22, 163, 74, 0.08);
+	}
+
+	.chat-panel__outcome-btn--correct:hover:not(:disabled) {
+		background: rgba(22, 163, 74, 0.2);
+		box-shadow: 0 0 24px rgba(22, 163, 74, 0.2);
+	}
+
+	/* ── Messages ────────────────────────────────────────────────────────────── */
+	.chat-panel__messages {
+		flex: 1 1 0;
+		overflow-y: auto;
+		padding: 0.5rem 1.125rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.625rem;
+		scroll-behavior: smooth;
+	}
+
+	.chat-panel__messages::-webkit-scrollbar { width: 3px; }
+	.chat-panel__messages::-webkit-scrollbar-track { background: transparent; }
+	.chat-panel__messages::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 4px; }
+
+	/* ── Bubble ──────────────────────────────────────────────────────────────── */
+	.chat-panel__bubble {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+		max-width: 84%;
+	}
+
+	.chat-panel__bubble--user {
+		align-self: flex-end;
 		align-items: flex-end;
 	}
 
-	.cp__msg-text {
+	.chat-panel__bubble--assistant {
+		align-self: flex-start;
+		align-items: flex-start;
+	}
+
+	.chat-panel__bubble-text {
 		margin: 0;
 		padding: 0.625rem 0.875rem;
 		border-radius: 1rem;
 		font-size: 0.9375rem;
 		line-height: 1.5;
-		word-break: break-word;
+		white-space: pre-wrap;
 	}
 
-	.cp__msg--ai .cp__msg-text {
-		background: rgba(255, 255, 255, 0.06);
-		color: #e2e8f0;
-		border-bottom-left-radius: 0.25rem;
-		border: 1px solid rgba(255, 255, 255, 0.07);
-	}
-
-	.cp__msg--user .cp__msg-text {
-		background: #2563eb;
-		color: #fff;
+	.chat-panel__bubble--user .chat-panel__bubble-text {
+		background: rgba(37, 99, 235, 0.22);
+		color: #bfdbfe;
+		border: 1px solid rgba(59, 130, 246, 0.2);
 		border-bottom-right-radius: 0.25rem;
 	}
 
-	/* Outcome overrides */
-	.cp__msg--outcome-correct .cp__msg-text {
-		background: rgba(22, 163, 74, 0.2);
-		color: #bbf7d0;
-		border: 1px solid rgba(22, 163, 74, 0.3);
-		font-weight: 600;
+	.chat-panel__bubble--assistant .chat-panel__bubble-text {
+		background: rgba(255, 255, 255, 0.05);
+		color: #e2e8f0;
+		border: 1px solid rgba(255, 255, 255, 0.07);
+		border-bottom-left-radius: 0.25rem;
 	}
 
-	.cp__msg--outcome-incorrect .cp__msg-text {
-		background: rgba(220, 38, 38, 0.2);
-		color: #fecaca;
-		border: 1px solid rgba(220, 38, 38, 0.3);
-		font-weight: 600;
-	}
-
-	.cp__msg-time {
+	.chat-panel__bubble-time {
 		font-size: 0.6875rem;
-		color: #334155;
-		padding: 0 0.1875rem;
+		color: #475569;
+		padding: 0 0.25rem;
 	}
 
-	/* Typing dots */
-	.cp__dots {
+	/* ── Outcome pills ───────────────────────────────────────────────────────── */
+	.chat-panel__outcome-pill {
+		align-self: center;
+		padding: 0.3125rem 0.875rem;
+		border-radius: 999px;
+		font-size: 0.8125rem;
+		font-weight: 600;
+		letter-spacing: 0.02em;
+	}
+
+	.chat-panel__outcome-pill--correct {
+		background: rgba(22, 163, 74, 0.15);
+		color: #86efac;
+		border: 1px solid rgba(22, 163, 74, 0.3);
+	}
+
+	.chat-panel__outcome-pill--incorrect {
+		background: rgba(220, 38, 38, 0.12);
+		color: #fca5a5;
+		border: 1px solid rgba(220, 38, 38, 0.28);
+	}
+
+	/* ── Typing indicator ────────────────────────────────────────────────────── */
+	.chat-panel__typing {
 		display: flex;
 		align-items: center;
-		gap: 0.3125rem;
-		padding: 0.75rem 1rem;
-		background: rgba(255, 255, 255, 0.06);
+		gap: 5px;
+		padding: 0.625rem 0.875rem;
+		background: rgba(255, 255, 255, 0.05);
+		border: 1px solid rgba(255, 255, 255, 0.07);
 		border-radius: 1rem;
 		border-bottom-left-radius: 0.25rem;
-		border: 1px solid rgba(255, 255, 255, 0.07);
+		width: fit-content;
+		align-self: flex-start;
 	}
 
-	.cp__dots span {
-		width: 0.4375rem;
-		height: 0.4375rem;
-		background: #475569;
+	.chat-panel__typing span {
+		width: 7px;
+		height: 7px;
 		border-radius: 50%;
-		animation: dots-bounce 1.3s ease-in-out infinite;
+		background: #475569;
+		animation: bounce-dot 1.1s ease-in-out infinite;
 	}
 
-	.cp__dots span:nth-child(2) { animation-delay: 0.15s; }
-	.cp__dots span:nth-child(3) { animation-delay: 0.3s; }
+	.chat-panel__typing span:nth-child(2) { animation-delay: 0.16s; }
+	.chat-panel__typing span:nth-child(3) { animation-delay: 0.32s; }
 
-	@keyframes dots-bounce {
-		0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
-		30% { transform: translateY(-5px); opacity: 1; }
-	}
-
-	/* ─── Input row ───────────────────────────────────────────── */
-	.cp__input-row {
+	/* ── Input row ───────────────────────────────────────────────────────────── */
+	.chat-panel__input-row {
 		display: flex;
-		gap: 0.5rem;
-		padding: 0.625rem 1rem;
-		padding-bottom: max(0.625rem, env(safe-area-inset-bottom));
-		border-top: 1px solid rgba(255, 255, 255, 0.05);
-		background: #090e1a;
+		align-items: center;
+		gap: 0.625rem;
+		padding: 0.75rem 1.125rem;
+		border-top: 1px solid rgba(255, 255, 255, 0.06);
 		flex-shrink: 0;
+		background: #090e1a;
 	}
 
-	.cp__input {
-		flex: 1 1 auto;
-		height: 2.875rem;
-		padding: 0 1rem;
+	.chat-panel__input {
+		flex: 1 1 0;
+		padding: 0.625rem 0.875rem;
+		background: rgba(255, 255, 255, 0.06);
+		border: 1px solid rgba(255, 255, 255, 0.1);
+		border-radius: 0.625rem;
 		font-size: 0.9375rem;
-		color: #f1f5f9;
-		background: rgba(255, 255, 255, 0.05);
-		border: 1px solid rgba(255, 255, 255, 0.09);
-		border-radius: 0.75rem;
+		color: #e2e8f0;
 		outline: none;
-		transition: border-color 0.15s, background 0.15s;
-		caret-color: #3b82f6;
+		transition: border-color 0.18s;
 	}
 
-	.cp__input:focus {
+	.chat-panel__input::placeholder { color: #475569; }
+
+	.chat-panel__input:focus {
 		border-color: rgba(59, 130, 246, 0.5);
-		background: rgba(255, 255, 255, 0.07);
 	}
 
-	.cp__input::placeholder {
-		color: #334155;
-	}
-
-	.cp__input:disabled {
+	.chat-panel__input:disabled {
 		opacity: 0.5;
 	}
 
-	.cp__send {
+	.chat-panel__send-btn {
+		width: 2.5rem;
+		height: 2.5rem;
+		border-radius: 50%;
+		border: none;
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		width: 2.875rem;
-		height: 2.875rem;
-		flex-shrink: 0;
-		border: none;
-		border-radius: 0.75rem;
 		background: #2563eb;
-		color: #fff;
+		color: #ffffff;
 		cursor: pointer;
-		touch-action: manipulation;
-		transition: background 0.15s, opacity 0.15s;
+		flex-shrink: 0;
+		transition: background 0.18s, transform 0.12s;
 	}
 
-	.cp__send:disabled {
-		background: rgba(255, 255, 255, 0.06);
-		color: #334155;
-		cursor: not-allowed;
-	}
-
-	.cp__send:not(:disabled):hover {
-		background: #1d4ed8;
-	}
-
-	.cp__send:not(:disabled):active {
-		transform: scale(0.94);
-	}
+	.chat-panel__send-btn:hover:not(:disabled) { background: #1d4ed8; }
+	.chat-panel__send-btn:active:not(:disabled) { transform: scale(0.92); }
+	.chat-panel__send-btn:disabled { background: #1e293b; color: #475569; cursor: not-allowed; }
 </style>
