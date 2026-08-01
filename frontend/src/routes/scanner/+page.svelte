@@ -4,6 +4,7 @@
 	import Scanner from '$lib/components/Scanner.svelte';
 	import ProductCard from '$lib/components/ProductCard.svelte';
 	import ProductLocationsCard from '$lib/components/ProductLocationsCard.svelte';
+	import ChatPanel from '$lib/components/ChatPanel.svelte';
 	import { scannerState, anchoredLocation, type AnchoredLocation } from '$lib/stores/scanner';
 	import { sessionStore } from '$lib/stores/session';
 	import {
@@ -55,6 +56,17 @@
 	let greenFlashTimeout: ReturnType<typeof setTimeout> | null = null;
 	let errorFlash = $state<string | null>(null);
 	let errorFlashTimeout: ReturnType<typeof setTimeout> | null = null;
+
+	let showChat = $state(false);
+
+	let chatContext = $derived({
+		sku: scannedProduct?.sku,
+		descripcion: scannedProduct?.descripcion ?? undefined,
+		ubicacion: $anchoredLocation
+			? `${$anchoredLocation.estante_nombre} F${$anchoredLocation.fila}-C${$anchoredLocation.columna}`
+			: undefined,
+		deposito: $sessionStore?.depositos.map((d) => d.deposito_nombre).join(', ') ?? undefined
+	});
 
 	let showLocationModal = $state(false);
 	let depositos = $state<Deposito[]>([]);
@@ -553,6 +565,14 @@
 			Cambiar ubicación
 		</button>
 
+		<button
+			type="button"
+			class="scanner-page__button scanner-page__button--ai"
+			onclick={() => (showChat = true)}
+		>
+			Asistente IA
+		</button>
+
 		{#if $scannerState === 'error'}
 			<button
 				type="button"
@@ -564,6 +584,19 @@
 		{/if}
 	</div>
 </div>
+
+{#if showChat}
+	<div
+		class="chat-backdrop"
+		role="presentation"
+		onclick={() => (showChat = false)}
+		transition:fade={{ duration: 200 }}
+	></div>
+	<ChatPanel
+		onClose={() => (showChat = false)}
+		context={chatContext}
+	/>
+{/if}
 
 {#if showLocationModal}
 	<div class="modal" role="dialog" aria-modal="true" aria-label="Seleccionar ubicación">
@@ -746,6 +779,23 @@
 	.scanner-page__button--primary {
 		color: #ffffff;
 		background-color: #2563eb;
+	}
+
+	.scanner-page__button--ai {
+		color: #ffffff;
+		background-color: #7c3aed;
+		grid-column: 1 / -1;
+	}
+
+	.scanner-page__button--ai:hover {
+		background-color: #6d28d9;
+	}
+
+	.chat-backdrop {
+		position: fixed;
+		inset: 0;
+		background-color: rgba(15, 23, 42, 0.55);
+		z-index: 99;
 	}
 
 	.scanner-page__button--small {
