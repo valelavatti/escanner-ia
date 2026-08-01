@@ -1,1053 +1,981 @@
 <script lang="ts">
-	let activeScreen = $state(0);
+	import { fly, fade } from 'svelte/transition';
+	import { cubicOut, quintOut } from 'svelte/easing';
 
-	const screens = [
-		{ label: 'Navegación', index: 0 },
-		{ label: 'Llegada', index: 1 },
-		{ label: 'Confirmación', index: 2 },
-		{ label: 'Error', index: 3 },
-		{ label: 'Resumen', index: 4 }
-	];
+	// ─── Types ────────────────────────────────────────────────────────────────
+	type ScanOutcome = 'correct' | 'incorrect';
+	type AIStatus = 'idle' | 'listening' | 'thinking' | 'speaking';
 
-	function next() {
-		activeScreen = (activeScreen + 1) % screens.length;
+	interface Message {
+		id: number;
+		role: 'user' | 'ai';
+		text: string;
+		outcome?: ScanOutcome;
+		ts: string;
 	}
-	function prev() {
-		activeScreen = (activeScreen - 1 + screens.length) % screens.length;
+
+	// ─── Demo product context ─────────────────────────────────────────────────
+	const PRODUCT = {
+		sku: 'ELC-7842-B',
+		descripcion: 'Cable HDMI 2.1 Premium 2m',
+		ubicacion: 'EST-A3 F2-C4',
+		deposito: 'Depósito Central',
+		cantidad: 24
+	};
+
+	// ─── Canned AI responses ──────────────────────────────────────────────────
+	const RESPONSES: Record<string, string[]> = {
+		correct: [
+			'Perfecto, escaneo registrado. Siguiente ítem: Cable HDMI en EST-A3, fila 2, columna 4.',
+			'Correcto. Quedan 11 ítems en el remito. Continuá por el pasillo A.',
+			'Registrado. Avanzá hacia EST-B1 para el próximo producto.'
+		],
+		incorrect: [
+			'Espera. Verificá el SKU: debería ser ELC-7842-B. Fijate que el cable sea negro, no blanco.',
+			'Ese no es el producto correcto. El Cable HDMI 2.1 está en EST-A3, fila 2, columna 4 — no en fila 3.',
+			'Error de escaneo. Revisá que estés en el estante A3 y no en A2. El producto tiene etiqueta azul.'
+		],
+		greeting: [
+			'Hola. Tenés el remito REM-2847 activo con 14 ítems. Primer producto: Cable HDMI 2.1 en EST-A3, fila 2, columna 4.',
+		],
+		question: [
+			'El producto está en el pasillo A, tercer estante desde la entrada. Fila 2, cuarta columna desde la izquierda.',
+			'Tenés 24 unidades disponibles en EST-A3. El mínimo de stock es 10.',
+			'El remito vence hoy a las 18:00. Quedan 11 ítems por confirmar.'
+		]
+	};
+
+	function pickRandom(arr: string[]) {
+		return arr[Math.floor(Math.random() * arr.length)];
 	}
+
+	// ─── State ────────────────────────────────────────────────────────────────
+	let msgId = 0;
+	let aiStatus = $state<AIStatus>('idle');
+	let messages = $state<Message[]>([
+		{
+			id: msgId++,
+			role: 'ai',
+			text: RESPONSES.greeting[0],
+			ts: now()
+		}
+	]);
+	let inputText = $state('');
+	let messagesEl = $state<HTMLElement | undefined>(undefined);
+	let muted = $state(false);
+	let isSpeaking = $state(false);
+
+	// Waveform bars
+	let waveHeights = $state<number[]>(Array.from({ length: 18 }, () => 4));
+	let waveTimer: ReturnType<typeof setInterval> | null = null;
+
+	// Orb animation frame
+	let orbPhase = $state(0);
+	let orbTimer: ReturnType<typeof setInterval> | null = null;
+
+	// ─── Helpers ──────────────────────────────────────────────────────────────
+	function now(): string {
+		return new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+	}
+
+	function startOrb() {
+		orbTimer = setInterval(() => {
+			orbPhase = (orbPhase + 1) % 360;
+		}, 16);
+	}
+
+	function stopOrb() {
+		if (orbTimer) { clearInterval(orbTimer); orbTimer = null; }
+		orbPhase = 0;
+	}
+
+	function startWave() {
+		isSpeaking = true;
+		waveTimer = setInterval(() => {
+			waveHeights = waveHeights.map(() => 3 + Math.random() * 22);
+		}, 80);
+	}
+
+	function stopWave() {
+		isSpeaking = false;
+		if (waveTimer) { clearInterval(waveTimer); waveTimer = null; }
+		waveHeights = Array.from({ length: 18 }, (_, i) => 3 + Math.sin(i * 0.6) * 4);
+	}
+
+	function speak(text: string) {
+		if (!('speechSynthesis' in window)) return;
+		window.speechSynthesis.cancel();
+		if (muted) return;
+		const utt = new SpeechSynthesisUtterance(text);
+		utt.lang = 'es-AR';
+		utt.rate = 1.05;
+		utt.pitch = 1;
+		utt.onstart = () => { startWave(); };
+		utt.onend = () => { stopWave(); aiStatus = 'idle'; };
+		utt.onerror = () => { stopWave(); aiStatus = 'idle'; };
+		window.speechSynthesis.speak(utt);
+	}
+
+	function scrollBottom() {
+		requestAnimationFrame(() => {
+			if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
+		});
+	}
+
+	function pushAI(text: string, extra?: Partial<Message>) {
+		messages = [
+			...messages,
+			{ id: msgId++, role: 'ai', text, ts: now(), ...extra }
+		];
+		scrollBottom();
+	}
+
+	function pushUser(text: string, extra?: Partial<Message>) {
+		messages = [
+			...messages,
+			{ id: msgId++, role: 'user', text, ts: now(), ...extra }
+		];
+		scrollBottom();
+	}
+
+	async function simulateAIResponse(responseKey: keyof typeof RESPONSES) {
+		aiStatus = 'thinking';
+		startOrb();
+		await new Promise(r => setTimeout(r, 900 + Math.random() * 400));
+		stopOrb();
+		aiStatus = 'speaking';
+		const reply = pickRandom(RESPONSES[responseKey]);
+		pushAI(reply);
+		speak(reply);
+	}
+
+	async function handleOutcome(outcome: ScanOutcome) {
+		if (aiStatus !== 'idle') return;
+		const label = outcome === 'correct' ? 'Escaneo correcto confirmado.' : 'Escaneo incorrecto reportado.';
+		pushUser(label, { outcome });
+		await simulateAIResponse(outcome);
+	}
+
+	async function handleSend() {
+		const text = inputText.trim();
+		if (!text || aiStatus !== 'idle') return;
+		inputText = '';
+		pushUser(text);
+		await simulateAIResponse('question');
+	}
+
+	function handleKeydown(e: KeyboardEvent) {
+		if (e.key === 'Enter' && !e.nativeEvent?.isComposing && e.keyCode !== 229) {
+			e.preventDefault();
+			handleSend();
+		}
+	}
+
+	function toggleMute() {
+		muted = !muted;
+		if (muted) { window.speechSynthesis?.cancel(); stopWave(); aiStatus = 'idle'; }
+	}
+
+	const orbGradientStart = $derived(
+		aiStatus === 'thinking' ? '#7c3aed' :
+		aiStatus === 'speaking' ? '#0ea5e9' :
+		aiStatus === 'listening' ? '#059669' :
+		'#1d4ed8'
+	);
+	const orbGradientEnd = $derived(
+		aiStatus === 'thinking' ? '#a855f7' :
+		aiStatus === 'speaking' ? '#38bdf8' :
+		aiStatus === 'listening' ? '#10b981' :
+		'#3b82f6'
+	);
 </script>
 
 <svelte:head>
-	<title>Mockups — Picking IA</title>
+	<title>Asistente IA — Picking</title>
+	<meta name="description" content="Demo del asistente de voz para operaciones de picking en depósito." />
 </svelte:head>
 
-<div class="showcase">
-	<!-- Screen selector tabs -->
-	<nav class="tabs" aria-label="Pantallas">
-		{#each screens as s}
-			<button
-				class="tab"
-				class:tab--active={activeScreen === s.index}
-				onclick={() => (activeScreen = s.index)}
-			>
-				{s.label}
-			</button>
-		{/each}
-	</nav>
-
-	<!-- Phone frame -->
-	<div class="stage">
-		<button class="arrow arrow--left" onclick={prev} aria-label="Anterior">&#8592;</button>
-
-		<div class="phone">
-			<div class="phone__frame">
-				<!-- Dynamic Island notch -->
-				<div class="phone__island"></div>
-
-				<!-- STATUS BAR -->
-				<div class="phone__statusbar">
-					<span class="phone__time">09:41</span>
-					<div class="phone__statusicons">
-						<!-- Signal -->
-						<svg width="16" height="11" viewBox="0 0 16 11" fill="none" aria-hidden="true">
-							<rect x="0" y="8" width="3" height="3" rx="0.5" fill="currentColor" opacity="0.35"/>
-							<rect x="4.5" y="5.5" width="3" height="5.5" rx="0.5" fill="currentColor" opacity="0.35"/>
-							<rect x="9" y="3" width="3" height="8" rx="0.5" fill="currentColor"/>
-							<rect x="13.5" y="0" width="2.5" height="11" rx="0.5" fill="currentColor"/>
-						</svg>
-						<!-- Wifi -->
-						<svg width="16" height="12" viewBox="0 0 16 12" fill="none" aria-hidden="true">
-							<path d="M8 9.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z" fill="currentColor"/>
-							<path d="M3.5 6.5C5 5 6.4 4.2 8 4.2s3 .8 4.5 2.3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none"/>
-							<path d="M1 4C3.2 1.8 5.4 0.8 8 0.8s4.8 1 7 3.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none" opacity="0.5"/>
-						</svg>
-						<!-- Battery -->
-						<div class="battery">
-							<div class="battery__fill" style="width:82%"></div>
-							<div class="battery__cap"></div>
-						</div>
-					</div>
-				</div>
-
-				<!-- SCREEN CONTENT -->
-				<div class="phone__screen">
-
-					<!-- ─── SCREEN 0: NAVIGATION ─── -->
-					{#if activeScreen === 0}
-					<div class="screen screen--nav">
-						<!-- Progress bar top -->
-						<div class="progress-bar">
-							<div class="progress-bar__track">
-								<div class="progress-bar__fill" style="width: 34%"></div>
-							</div>
-							<span class="progress-bar__label">12 / 35</span>
-						</div>
-
-						<!-- Product image -->
-						<div class="nav__product-image">
-							<img src="/mockup-product.png" alt="Caja de cartón industrial" />
-						</div>
-
-						<!-- Product info -->
-						<div class="nav__product-info">
-							<p class="nav__sku">SKU-00421-B</p>
-							<h2 class="nav__name">Caja Corrugada 60x40</h2>
-							<div class="nav__qty">
-								<span class="nav__qty-label">Cantidad</span>
-								<span class="nav__qty-value">3</span>
-							</div>
-						</div>
-
-						<!-- Direction arrow -->
-						<div class="nav__arrow-wrap">
-							<div class="nav__arrow" aria-label="Girar a la derecha">
-								<svg viewBox="0 0 80 80" fill="none">
-									<path d="M20 40h40M45 25l15 15-15 15" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
-								</svg>
-							</div>
-						</div>
-
-						<!-- Location + distance -->
-						<div class="nav__location">
-							<div class="nav__location-badge">
-								<span class="nav__location-icon">
-									<svg viewBox="0 0 24 24" fill="none" width="20" height="20"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5S10.62 6.5 12 6.5s2.5 1.12 2.5 2.5S13.38 11.5 12 11.5z" fill="currentColor"/></svg>
-								</span>
-								<span class="nav__location-text">Pasillo B · Est. 4 · Nivel 2</span>
-							</div>
-							<div class="nav__distance">
-								<span class="nav__distance-value">18</span>
-								<span class="nav__distance-unit">m</span>
-							</div>
-						</div>
-					</div>
-					{/if}
-
-					<!-- ─── SCREEN 1: ARRIVAL ─── -->
-					{#if activeScreen === 1}
-					<div class="screen screen--arrival">
-						<div class="arrival__pulse-ring"></div>
-						<div class="arrival__image-wrap">
-							<img src="/mockup-product.png" alt="Caja Corrugada 60x40" />
-						</div>
-
-						<div class="arrival__badge">
-							<svg viewBox="0 0 24 24" fill="none" width="22" height="22"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" fill="currentColor"/></svg>
-							Producto encontrado
-						</div>
-
-						<h2 class="arrival__name">Caja Corrugada 60x40</h2>
-						<p class="arrival__sku">SKU-00421-B</p>
-
-						<div class="arrival__location-card">
-							<div class="arrival__location-row">
-								<span class="arrival__location-key">Pasillo</span>
-								<span class="arrival__location-val">B</span>
-							</div>
-							<div class="arrival__location-row">
-								<span class="arrival__location-key">Estantería</span>
-								<span class="arrival__location-val">4</span>
-							</div>
-							<div class="arrival__location-row arrival__location-row--highlight">
-								<span class="arrival__location-key">Nivel</span>
-								<span class="arrival__location-val">2</span>
-							</div>
-						</div>
-
-						<p class="arrival__hint">Escanea el producto para confirmar</p>
-					</div>
-					{/if}
-
-					<!-- ─── SCREEN 2: CONFIRMATION ─── -->
-					{#if activeScreen === 2}
-					<div class="screen screen--confirm">
-						<div class="confirm__circle">
-							<svg class="confirm__check" viewBox="0 0 80 80" fill="none">
-								<circle cx="40" cy="40" r="38" stroke="currentColor" stroke-width="4"/>
-								<path d="M22 41l13 13 23-27" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-							</svg>
-						</div>
-
-						<h2 class="confirm__title">Producto confirmado</h2>
-						<p class="confirm__name">Caja Corrugada 60x40</p>
-
-						<div class="confirm__counter">
-							<span class="confirm__counter-current">13</span>
-							<span class="confirm__counter-sep">/</span>
-							<span class="confirm__counter-total">35</span>
-						</div>
-
-						<div class="confirm__progress">
-							<div class="confirm__progress-fill" style="width: 37%"></div>
-						</div>
-
-						<p class="confirm__next-label">Siguiente producto en</p>
-						<div class="confirm__countdown">3</div>
-					</div>
-					{/if}
-
-					<!-- ─── SCREEN 3: ERROR ─── -->
-					{#if activeScreen === 3}
-					<div class="screen screen--error">
-						<div class="error__icon">
-							<svg viewBox="0 0 80 80" fill="none">
-								<circle cx="40" cy="40" r="38" stroke="currentColor" stroke-width="4"/>
-								<path d="M40 22v22" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>
-								<circle cx="40" cy="54" r="3.5" fill="currentColor"/>
-							</svg>
-						</div>
-
-						<h2 class="error__title">Producto incorrecto</h2>
-
-						<div class="error__compare">
-							<div class="error__product error__product--expected">
-								<span class="error__product-tag error__product-tag--expected">Esperado</span>
-								<img src="/mockup-product.png" alt="Producto esperado" />
-								<p class="error__product-name">Caja Corrugada 60x40</p>
-								<p class="error__product-sku">SKU-00421-B</p>
-							</div>
-							<div class="error__vs">&#8800;</div>
-							<div class="error__product error__product--scanned">
-								<span class="error__product-tag error__product-tag--scanned">Escaneado</span>
-								<div class="error__product-placeholder">?</div>
-								<p class="error__product-name">Caja Simple 40x30</p>
-								<p class="error__product-sku">SKU-00318-A</p>
-							</div>
-						</div>
-
-						<div class="error__action">
-							<svg viewBox="0 0 24 24" fill="none" width="20" height="20"><path d="M19 12H5M12 5l-7 7 7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-							Volvé a Pasillo B · Est. 4 · Nivel 2
-						</div>
-					</div>
-					{/if}
-
-					<!-- ─── SCREEN 4: SUMMARY ─── -->
-					{#if activeScreen === 4}
-					<div class="screen screen--summary">
-						<div class="summary__badge">
-							<svg viewBox="0 0 24 24" fill="none" width="28" height="28"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-						</div>
-						<h2 class="summary__title">Tarea completada</h2>
-						<p class="summary__order">Orden #ORD-2024-0847</p>
-
-						<div class="summary__stats">
-							<div class="summary__stat">
-								<span class="summary__stat-value">23:14</span>
-								<span class="summary__stat-label">Tiempo total</span>
-							</div>
-							<div class="summary__stat">
-								<span class="summary__stat-value">35</span>
-								<span class="summary__stat-label">Productos</span>
-							</div>
-							<div class="summary__stat">
-								<span class="summary__stat-value">840m</span>
-								<span class="summary__stat-label">Recorrido</span>
-							</div>
-							<div class="summary__stat summary__stat--accent">
-								<span class="summary__stat-value">97%</span>
-								<span class="summary__stat-label">Precisión</span>
-							</div>
-						</div>
-
-						<div class="summary__breakdown">
-							<div class="summary__breakdown-row">
-								<span>Scans correctos</span>
-								<span class="summary__breakdown-good">34</span>
-							</div>
-							<div class="summary__breakdown-row">
-								<span>Correcciones</span>
-								<span class="summary__breakdown-warn">1</span>
-							</div>
-						</div>
-
-						<button class="summary__cta">
-							Nueva orden
-						</button>
-					</div>
-					{/if}
-
-				</div><!-- /phone__screen -->
-
-				<!-- Home indicator -->
-				<div class="phone__home-indicator"></div>
+<main class="app">
+	<!-- ─── Top bar ──────────────────────────────────────────────────────────── -->
+	<header class="topbar">
+		<div class="topbar__left">
+			<div class="topbar__logo" aria-hidden="true">
+				<svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+					<path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+					<polyline points="9 22 9 12 15 12 15 22" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+				</svg>
+			</div>
+			<div>
+				<p class="topbar__title">Depósito Central</p>
+				<p class="topbar__sub">REM-2847 · 14 ítems</p>
 			</div>
 		</div>
+		<div class="topbar__right">
+			<div class="topbar__ai-badge" class:topbar__ai-badge--active={aiStatus !== 'idle'}>
+				<span class="topbar__ai-dot"></span>
+				{#if aiStatus === 'thinking'}
+					Pensando
+				{:else if aiStatus === 'speaking'}
+					Hablando
+				{:else}
+					IA activa
+				{/if}
+			</div>
+		</div>
+	</header>
 
-		<button class="arrow arrow--right" onclick={next} aria-label="Siguiente">&#8594;</button>
-	</div>
+	<!-- ─── Product context card ─────────────────────────────────────────────── -->
+	<section class="product-card" aria-label="Producto activo">
+		<div class="product-card__icon" aria-hidden="true">
+			<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+				<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+				<polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
+				<line x1="12" y1="22.08" x2="12" y2="12"/>
+			</svg>
+		</div>
+		<div class="product-card__info">
+			<p class="product-card__sku">{PRODUCT.sku}</p>
+			<p class="product-card__desc">{PRODUCT.descripcion}</p>
+		</div>
+		<div class="product-card__meta">
+			<span class="product-card__location">
+				<svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+					<path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+				</svg>
+				{PRODUCT.ubicacion}
+			</span>
+			<span class="product-card__qty">×{PRODUCT.cantidad}</span>
+		</div>
+	</section>
 
-	<p class="showcase__hint">
-		{screens[activeScreen].label} &mdash; {activeScreen + 1} de {screens.length}
-	</p>
-</div>
+	<!-- ─── AI Voice orb + outcome buttons ──────────────────────────────────── -->
+	<section class="voice-section" aria-label="Control de voz">
+		<!-- Outcome buttons -->
+		<button
+			class="outcome-btn outcome-btn--incorrect"
+			onclick={() => handleOutcome('incorrect')}
+			disabled={aiStatus !== 'idle'}
+			aria-label="Escaneo incorrecto"
+		>
+			<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true">
+				<line x1="18" y1="6" x2="6" y2="18"/>
+				<line x1="6" y1="6" x2="18" y2="18"/>
+			</svg>
+			<span>Incorrecto</span>
+		</button>
+
+		<!-- Central orb -->
+		<div class="orb-wrap" aria-live="polite" aria-label="Estado del asistente">
+			<div
+				class="orb"
+				class:orb--active={aiStatus !== 'idle'}
+				style="--orb-start: {orbGradientStart}; --orb-end: {orbGradientEnd};"
+			>
+				<!-- Pulse rings -->
+				{#if aiStatus !== 'idle'}
+					<div class="orb__ring orb__ring--1" transition:fade={{ duration: 300 }}></div>
+					<div class="orb__ring orb__ring--2" transition:fade={{ duration: 300 }}></div>
+				{/if}
+
+				<!-- Waveform inside orb when speaking -->
+				{#if isSpeaking}
+					<div class="orb__wave" aria-hidden="true" transition:fade={{ duration: 150 }}>
+						{#each waveHeights as h, i}
+							<span class="orb__bar" style="height: {h}px; animation-delay: {i * 40}ms;"></span>
+						{/each}
+					</div>
+				{:else if aiStatus === 'thinking'}
+					<div class="orb__dots" aria-hidden="true" transition:fade={{ duration: 150 }}>
+						<span></span><span></span><span></span>
+					</div>
+				{:else}
+					<div class="orb__icon" transition:fade={{ duration: 150 }}>
+						<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+							<path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+							<path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+							<line x1="12" y1="19" x2="12" y2="23"/>
+							<line x1="8" y1="23" x2="16" y2="23"/>
+						</svg>
+					</div>
+				{/if}
+			</div>
+
+			<!-- Status label -->
+			<p class="orb__label">
+				{#if aiStatus === 'idle'}
+					Listo para escuchar
+				{:else if aiStatus === 'thinking'}
+					Procesando...
+				{:else if aiStatus === 'speaking'}
+					Respondiendo
+				{/if}
+			</p>
+		</div>
+
+		<!-- Correct button -->
+		<button
+			class="outcome-btn outcome-btn--correct"
+			onclick={() => handleOutcome('correct')}
+			disabled={aiStatus !== 'idle'}
+			aria-label="Escaneo correcto"
+		>
+			<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+				<polyline points="20 6 9 17 4 12"/>
+			</svg>
+			<span>Correcto</span>
+		</button>
+	</section>
+
+	<!-- ─── Conversation ──────────────────────────────────────────────────────── -->
+	<section
+		class="messages"
+		bind:this={messagesEl}
+		aria-live="polite"
+		aria-label="Conversación con el asistente"
+	>
+		{#each messages as msg (msg.id)}
+			<div
+				class="msg"
+				class:msg--ai={msg.role === 'ai'}
+				class:msg--user={msg.role === 'user'}
+				class:msg--correct={msg.outcome === 'correct'}
+				class:msg--incorrect={msg.outcome === 'incorrect'}
+				transition:fly={{ y: 12, duration: 240, easing: cubicOut }}
+			>
+				{#if msg.role === 'ai'}
+					<div class="msg__avatar" aria-hidden="true">IA</div>
+				{/if}
+				<div class="msg__body">
+					<p class="msg__text">{msg.text}</p>
+					<time class="msg__ts" datetime={new Date().toISOString()}>{msg.ts}</time>
+				</div>
+			</div>
+		{/each}
+
+		{#if aiStatus === 'thinking'}
+			<div class="msg msg--ai" transition:fade={{ duration: 150 }}>
+				<div class="msg__avatar" aria-hidden="true">IA</div>
+				<div class="msg__body">
+					<div class="typing-dots"><span></span><span></span><span></span></div>
+				</div>
+			</div>
+		{/if}
+	</section>
+
+	<!-- ─── Input row ─────────────────────────────────────────────────────────── -->
+	<footer class="input-row">
+		<button
+			class="input-row__mute"
+			class:input-row__mute--off={muted}
+			onclick={toggleMute}
+			aria-label={muted ? 'Activar voz' : 'Silenciar voz'}
+		>
+			{#if muted}
+				<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+					<line x1="1" y1="1" x2="23" y2="23"/>
+					<path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/>
+					<path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"/>
+					<line x1="12" y1="19" x2="12" y2="23"/>
+					<line x1="8" y1="23" x2="16" y2="23"/>
+				</svg>
+			{:else}
+				<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+					<path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+					<path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+					<line x1="12" y1="19" x2="12" y2="23"/>
+					<line x1="8" y1="23" x2="16" y2="23"/>
+				</svg>
+			{/if}
+		</button>
+
+		<input
+			type="text"
+			class="input-row__field"
+			placeholder="Preguntale algo al asistente..."
+			bind:value={inputText}
+			onkeydown={handleKeydown}
+			disabled={aiStatus !== 'idle'}
+			aria-label="Mensaje al asistente"
+			autocomplete="off"
+			autocorrect="off"
+			spellcheck="false"
+		/>
+
+		<button
+			class="input-row__send"
+			onclick={handleSend}
+			disabled={aiStatus !== 'idle' || !inputText.trim()}
+			aria-label="Enviar"
+		>
+			<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+				<line x1="22" y1="2" x2="11" y2="13"/>
+				<polygon points="22 2 15 22 11 13 2 9 22 2"/>
+			</svg>
+		</button>
+	</footer>
+</main>
 
 <style>
-	/* ── SHOWCASE WRAPPER ── */
-	.showcase {
-		min-height: 100vh;
+	/* ─── Reset & tokens ──────────────────────────────────────────────────────── */
+	*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+	:global(html), :global(body) {
+		height: 100%;
+		background: #060b14;
+	}
+
+	.app {
 		display: flex;
 		flex-direction: column;
-		align-items: center;
-		gap: 1.5rem;
-		padding: 2rem 1rem 3rem;
-		background: #0a0a0f;
-	}
-
-	/* ── TABS ── */
-	.tabs {
-		display: flex;
-		gap: 0.5rem;
-		flex-wrap: wrap;
-		justify-content: center;
-	}
-	.tab {
-		padding: 0.4rem 1rem;
-		font-size: 0.78rem;
-		font-weight: 600;
-		letter-spacing: 0.04em;
-		text-transform: uppercase;
-		color: #6b7280;
-		background: #18181b;
-		border: 1px solid #27272a;
-		border-radius: 999px;
-		cursor: pointer;
-		transition: all 0.15s;
-	}
-	.tab:hover { color: #e5e7eb; border-color: #3f3f46; }
-	.tab--active {
-		color: #fff;
-		background: #2563eb;
-		border-color: #2563eb;
-	}
-
-	/* ── STAGE ── */
-	.stage {
-		display: flex;
-		align-items: center;
-		gap: 2rem;
-	}
-	.arrow {
-		width: 2.5rem;
-		height: 2.5rem;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		font-size: 1.25rem;
-		color: #9ca3af;
-		background: #18181b;
-		border: 1px solid #27272a;
-		border-radius: 50%;
-		cursor: pointer;
-		transition: all 0.15s;
-		flex-shrink: 0;
-	}
-	.arrow:hover { color: #fff; border-color: #3f3f46; }
-
-	/* ── PHONE FRAME ── */
-	.phone {
-		width: 320px;
-		flex-shrink: 0;
-	}
-	.phone__frame {
-		position: relative;
-		background: #111113;
-		border-radius: 44px;
-		border: 2px solid #2a2a2e;
-		box-shadow:
-			0 0 0 6px #18181b,
-			0 0 0 7px #2a2a2e,
-			0 30px 80px rgba(0,0,0,0.7),
-			inset 0 1px 0 rgba(255,255,255,0.06);
+		height: 100dvh;
+		max-width: 480px;
+		margin: 0 auto;
+		background: #060b14;
+		color: #e2e8f0;
+		font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+		-webkit-font-smoothing: antialiased;
 		overflow: hidden;
-		display: flex;
-		flex-direction: column;
-		min-height: 680px;
 	}
 
-	/* Dynamic Island */
-	.phone__island {
-		position: absolute;
-		top: 12px;
-		left: 50%;
-		transform: translateX(-50%);
-		width: 100px;
-		height: 28px;
-		background: #000;
-		border-radius: 999px;
-		z-index: 10;
-	}
-
-	/* Status bar */
-	.phone__statusbar {
+	/* ─── Top bar ─────────────────────────────────────────────────────────────── */
+	.topbar {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		padding: 10px 22px 0;
-		height: 48px;
-		color: #fff;
-		font-size: 0.72rem;
-		font-weight: 600;
+		padding: 0.875rem 1.25rem 0.75rem;
+		border-bottom: 1px solid rgba(255,255,255,0.05);
 		flex-shrink: 0;
 	}
-	.phone__time { letter-spacing: -0.02em; }
-	.phone__statusicons {
+
+	.topbar__left {
 		display: flex;
 		align-items: center;
-		gap: 6px;
-	}
-	.battery {
-		position: relative;
-		width: 24px;
-		height: 12px;
-		border: 1.5px solid currentColor;
-		border-radius: 2.5px;
-	}
-	.battery__fill {
-		position: absolute;
-		top: 1px;
-		left: 1px;
-		bottom: 1px;
-		background: currentColor;
-		border-radius: 1px;
-	}
-	.battery__cap {
-		position: absolute;
-		right: -4px;
-		top: 50%;
-		transform: translateY(-50%);
-		width: 3px;
-		height: 6px;
-		background: currentColor;
-		border-radius: 0 1px 1px 0;
-		opacity: 0.4;
+		gap: 0.75rem;
 	}
 
-	/* Screen area */
-	.phone__screen {
-		flex: 1;
-		overflow: hidden;
-		display: flex;
-		flex-direction: column;
-	}
-
-	/* Home indicator */
-	.phone__home-indicator {
-		height: 28px;
+	.topbar__logo {
+		width: 2rem;
+		height: 2rem;
+		border-radius: 0.5rem;
+		background: rgba(37,99,235,0.15);
+		border: 1px solid rgba(37,99,235,0.25);
 		display: flex;
 		align-items: center;
 		justify-content: center;
+		color: #60a5fa;
 		flex-shrink: 0;
 	}
-	.phone__home-indicator::after {
-		content: '';
-		display: block;
-		width: 120px;
-		height: 4px;
-		background: rgba(255,255,255,0.25);
-		border-radius: 999px;
+
+	.topbar__title {
+		font-size: 0.9375rem;
+		font-weight: 700;
+		color: #f1f5f9;
+		letter-spacing: -0.01em;
+		line-height: 1.2;
 	}
 
-	/* ── HINT ── */
-	.showcase__hint {
-		font-size: 0.8rem;
-		color: #52525b;
-		text-align: center;
-		margin: 0;
+	.topbar__sub {
+		font-size: 0.71875rem;
+		color: #475569;
+		margin-top: 0.0625rem;
+		line-height: 1.2;
 	}
 
-	/* ════════════════════════════════════════
-	   SCREEN SHARED
-	════════════════════════════════════════ */
-	.screen {
-		flex: 1;
-		display: flex;
-		flex-direction: column;
-		padding: 0.75rem 1.1rem 0.5rem;
-		color: #fff;
-		overflow: hidden;
-	}
-
-	/* ════════════════════════════════════════
-	   SCREEN 0 — NAVIGATION
-	════════════════════════════════════════ */
-	.screen--nav {
-		background: #0d0d12;
-		gap: 0.55rem;
-	}
-
-	/* Progress */
-	.progress-bar {
+	.topbar__ai-badge {
 		display: flex;
 		align-items: center;
-		gap: 0.6rem;
+		gap: 0.375rem;
+		padding: 0.3125rem 0.625rem;
+		border-radius: 99px;
+		font-size: 0.6875rem;
+		font-weight: 600;
+		letter-spacing: 0.02em;
+		text-transform: uppercase;
+		background: rgba(255,255,255,0.04);
+		border: 1px solid rgba(255,255,255,0.08);
+		color: #475569;
+		transition: background 0.3s, color 0.3s, border-color 0.3s;
 	}
-	.progress-bar__track {
-		flex: 1;
-		height: 6px;
-		background: #1e1e28;
-		border-radius: 999px;
-		overflow: hidden;
+
+	.topbar__ai-badge--active {
+		background: rgba(37,99,235,0.12);
+		border-color: rgba(37,99,235,0.3);
+		color: #93c5fd;
 	}
-	.progress-bar__fill {
-		height: 100%;
-		background: #2563eb;
-		border-radius: 999px;
+
+	.topbar__ai-dot {
+		display: inline-block;
+		width: 0.4375rem;
+		height: 0.4375rem;
+		border-radius: 50%;
+		background: #22c55e;
+		animation: pulse-dot 2s ease-in-out infinite;
 	}
-	.progress-bar__label {
-		font-size: 0.72rem;
+
+	@keyframes pulse-dot {
+		0%, 100% { opacity: 1; transform: scale(1); }
+		50% { opacity: 0.5; transform: scale(0.85); }
+	}
+
+	/* ─── Product card ────────────────────────────────────────────────────────── */
+	.product-card {
+		display: flex;
+		align-items: center;
+		gap: 0.875rem;
+		margin: 0.875rem 1.25rem;
+		padding: 0.875rem 1rem;
+		background: rgba(255,255,255,0.035);
+		border: 1px solid rgba(255,255,255,0.07);
+		border-radius: 1rem;
+		flex-shrink: 0;
+	}
+
+	.product-card__icon {
+		width: 2.75rem;
+		height: 2.75rem;
+		border-radius: 0.75rem;
+		background: rgba(37,99,235,0.1);
+		border: 1px solid rgba(37,99,235,0.18);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		color: #60a5fa;
+		flex-shrink: 0;
+	}
+
+	.product-card__info {
+		flex: 1 1 auto;
+		min-width: 0;
+	}
+
+	.product-card__sku {
+		font-size: 0.75rem;
 		font-weight: 700;
-		color: #6b7280;
+		color: #93c5fd;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		line-height: 1.2;
+	}
+
+	.product-card__desc {
+		font-size: 0.875rem;
+		color: #cbd5e1;
+		margin-top: 0.1875rem;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		line-height: 1.3;
+	}
+
+	.product-card__meta {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-end;
+		gap: 0.25rem;
+		flex-shrink: 0;
+	}
+
+	.product-card__location {
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
+		font-size: 0.6875rem;
+		font-weight: 600;
+		color: #86efac;
+		background: rgba(22,163,74,0.1);
+		border: 1px solid rgba(22,163,74,0.2);
+		padding: 0.1875rem 0.5rem;
+		border-radius: 99px;
 		white-space: nowrap;
 	}
 
-	/* Product image */
-	.nav__product-image {
-		background: #16161d;
-		border-radius: 14px;
-		overflow: hidden;
-		height: 130px;
+	.product-card__qty {
+		font-size: 0.6875rem;
+		font-weight: 700;
+		color: #64748b;
+		letter-spacing: 0.02em;
+	}
+
+	/* ─── Voice section ───────────────────────────────────────────────────────── */
+	.voice-section {
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		border: 1px solid #1f1f2a;
-	}
-	.nav__product-image img {
-		max-height: 110px;
-		max-width: 100%;
-		object-fit: contain;
-	}
-
-	/* Product info */
-	.nav__product-info {
-		display: flex;
-		flex-direction: column;
-		gap: 0.15rem;
-	}
-	.nav__sku {
-		margin: 0;
-		font-size: 0.68rem;
-		font-weight: 700;
-		letter-spacing: 0.1em;
-		color: #2563eb;
-		text-transform: uppercase;
-	}
-	.nav__name {
-		margin: 0;
-		font-size: 1.2rem;
-		font-weight: 800;
-		letter-spacing: -0.02em;
-		line-height: 1.2;
-		color: #f1f5f9;
-	}
-	.nav__qty {
-		display: flex;
-		align-items: baseline;
-		gap: 0.5rem;
-		margin-top: 0.15rem;
-	}
-	.nav__qty-label {
-		font-size: 0.7rem;
-		color: #71717a;
-		font-weight: 600;
-		text-transform: uppercase;
-		letter-spacing: 0.06em;
-	}
-	.nav__qty-value {
-		font-size: 1.8rem;
-		font-weight: 900;
-		line-height: 1;
-		color: #f1f5f9;
-	}
-
-	/* Arrow */
-	.nav__arrow-wrap {
-		display: flex;
-		justify-content: center;
-	}
-	.nav__arrow {
-		width: 80px;
-		height: 80px;
-		background: #1a2744;
-		border: 2px solid #2563eb;
-		border-radius: 50%;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		color: #2563eb;
-		box-shadow: 0 0 0 6px rgba(37,99,235,0.1), 0 0 24px rgba(37,99,235,0.2);
-	}
-	.nav__arrow svg { width: 48px; height: 48px; }
-
-	/* Location */
-	.nav__location {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		background: #16161d;
-		border: 1px solid #1f1f2a;
-		border-radius: 12px;
-		padding: 0.55rem 0.8rem;
-	}
-	.nav__location-badge {
-		display: flex;
-		align-items: center;
-		gap: 0.4rem;
-		color: #94a3b8;
-	}
-	.nav__location-icon { display: flex; color: #2563eb; }
-	.nav__location-text {
-		font-size: 0.78rem;
-		font-weight: 600;
-	}
-	.nav__distance {
-		display: flex;
-		align-items: baseline;
-		gap: 2px;
-	}
-	.nav__distance-value {
-		font-size: 1.8rem;
-		font-weight: 900;
-		color: #f1f5f9;
-		line-height: 1;
-	}
-	.nav__distance-unit {
-		font-size: 0.8rem;
-		font-weight: 700;
-		color: #6b7280;
-	}
-
-	/* ════════════════════════════════════════
-	   SCREEN 1 — ARRIVAL
-	════════════════════════════════════════ */
-	.screen--arrival {
-		background: #0a0f1e;
-		align-items: center;
-		text-align: center;
-		gap: 0.6rem;
-		position: relative;
-	}
-
-	.arrival__pulse-ring {
-		position: absolute;
-		top: 50%;
-		left: 50%;
-		transform: translate(-50%, -55%);
-		width: 220px;
-		height: 220px;
-		border-radius: 50%;
-		background: radial-gradient(circle, rgba(37,99,235,0.12) 0%, transparent 70%);
-		pointer-events: none;
-	}
-
-	.arrival__badge {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.4rem;
-		background: #1a2744;
-		border: 1px solid #2563eb;
-		color: #60a5fa;
-		font-size: 0.72rem;
-		font-weight: 700;
-		letter-spacing: 0.05em;
-		text-transform: uppercase;
-		border-radius: 999px;
-		padding: 0.3rem 0.85rem;
-	}
-
-	.arrival__image-wrap {
-		width: 160px;
-		height: 160px;
-		background: #111827;
-		border-radius: 20px;
-		border: 2px solid #2563eb;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		overflow: hidden;
-		box-shadow: 0 0 0 6px rgba(37,99,235,0.12), 0 0 40px rgba(37,99,235,0.15);
-	}
-	.arrival__image-wrap img {
-		max-width: 90%;
-		max-height: 90%;
-		object-fit: contain;
-	}
-
-	.arrival__name {
-		margin: 0;
-		font-size: 1.2rem;
-		font-weight: 800;
-		color: #f1f5f9;
-		line-height: 1.2;
-	}
-	.arrival__sku {
-		margin: 0;
-		font-size: 0.68rem;
-		font-weight: 700;
-		letter-spacing: 0.1em;
-		color: #2563eb;
-		text-transform: uppercase;
-	}
-
-	.arrival__location-card {
-		width: 100%;
-		background: #111827;
-		border-radius: 14px;
-		border: 1px solid #1e2840;
-		overflow: hidden;
-	}
-	.arrival__location-row {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: 0.5rem 1rem;
-		border-bottom: 1px solid #1e2840;
-	}
-	.arrival__location-row:last-child { border-bottom: none; }
-	.arrival__location-row--highlight {
-		background: #1a2744;
-	}
-	.arrival__location-key {
-		font-size: 0.72rem;
-		color: #94a3b8;
-		font-weight: 600;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-	}
-	.arrival__location-val {
-		font-size: 1.3rem;
-		font-weight: 900;
-		color: #f1f5f9;
-	}
-	.arrival__location-row--highlight .arrival__location-val {
-		color: #60a5fa;
-	}
-
-	.arrival__hint {
-		margin: 0;
-		font-size: 0.72rem;
-		color: #4b5563;
-		font-weight: 500;
-	}
-
-	/* ════════════════════════════════════════
-	   SCREEN 2 — CONFIRMATION
-	════════════════════════════════════════ */
-	.screen--confirm {
-		background: #041408;
-		align-items: center;
-		text-align: center;
-		gap: 0.6rem;
-		justify-content: center;
-	}
-
-	.confirm__circle {
-		width: 110px;
-		height: 110px;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		color: #16a34a;
-		filter: drop-shadow(0 0 20px rgba(22,163,74,0.4));
-	}
-	.confirm__check { width: 110px; height: 110px; }
-
-	.confirm__title {
-		margin: 0;
-		font-size: 1.6rem;
-		font-weight: 900;
-		color: #16a34a;
-		letter-spacing: -0.03em;
-		line-height: 1.1;
-	}
-	.confirm__name {
-		margin: 0;
-		font-size: 0.9rem;
-		color: #6b7280;
-		font-weight: 500;
-	}
-
-	.confirm__counter {
-		display: flex;
-		align-items: baseline;
-		gap: 0.3rem;
-		margin-top: 0.25rem;
-	}
-	.confirm__counter-current {
-		font-size: 3rem;
-		font-weight: 900;
-		color: #f1f5f9;
-		line-height: 1;
-	}
-	.confirm__counter-sep {
-		font-size: 1.5rem;
-		color: #374151;
-		font-weight: 700;
-	}
-	.confirm__counter-total {
-		font-size: 1.4rem;
-		font-weight: 700;
-		color: #4b5563;
-	}
-
-	.confirm__progress {
-		width: 100%;
-		height: 6px;
-		background: #1a2e1a;
-		border-radius: 999px;
-		overflow: hidden;
-	}
-	.confirm__progress-fill {
-		height: 100%;
-		background: #16a34a;
-		border-radius: 999px;
-	}
-
-	.confirm__next-label {
-		margin: 0.25rem 0 0;
-		font-size: 0.72rem;
-		color: #6b7280;
-		font-weight: 500;
-		text-transform: uppercase;
-		letter-spacing: 0.06em;
-	}
-	.confirm__countdown {
-		font-size: 2.5rem;
-		font-weight: 900;
-		color: #22c55e;
-		line-height: 1;
-	}
-
-	/* ════════════════════════════════════════
-	   SCREEN 3 — ERROR
-	════════════════════════════════════════ */
-	.screen--error {
-		background: #0f0608;
-		align-items: center;
-		text-align: center;
-		gap: 0.65rem;
-	}
-
-	.error__icon {
-		width: 72px;
-		height: 72px;
-		color: #dc2626;
-		filter: drop-shadow(0 0 16px rgba(220,38,38,0.35));
-	}
-	.error__icon svg { width: 72px; height: 72px; }
-
-	.error__title {
-		margin: 0;
-		font-size: 1.4rem;
-		font-weight: 900;
-		color: #dc2626;
-		letter-spacing: -0.02em;
-	}
-
-	.error__compare {
-		display: flex;
-		align-items: flex-start;
-		gap: 0.5rem;
-		width: 100%;
-	}
-	.error__product {
-		flex: 1;
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		gap: 0.3rem;
-		background: #18181b;
-		border-radius: 12px;
-		padding: 0.6rem 0.4rem;
-		position: relative;
-	}
-	.error__product--expected { border: 1px solid #16a34a33; }
-	.error__product--scanned  { border: 1px solid #dc262633; }
-
-	.error__product-tag {
-		position: absolute;
-		top: -9px;
-		font-size: 0.58rem;
-		font-weight: 800;
-		letter-spacing: 0.07em;
-		text-transform: uppercase;
-		padding: 2px 8px;
-		border-radius: 999px;
-	}
-	.error__product-tag--expected {
-		background: #14532d;
-		color: #22c55e;
-	}
-	.error__product-tag--scanned {
-		background: #450a0a;
-		color: #f87171;
-	}
-
-	.error__product img {
-		width: 64px;
-		height: 64px;
-		object-fit: contain;
-	}
-	.error__product-placeholder {
-		width: 64px;
-		height: 64px;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		font-size: 2rem;
-		font-weight: 900;
-		color: #374151;
-		background: #111113;
-		border-radius: 8px;
-	}
-	.error__product-name {
-		margin: 0;
-		font-size: 0.68rem;
-		font-weight: 700;
-		color: #d1d5db;
-		line-height: 1.2;
-		text-align: center;
-	}
-	.error__product-sku {
-		margin: 0;
-		font-size: 0.58rem;
-		color: #6b7280;
-		font-weight: 600;
-		letter-spacing: 0.05em;
-	}
-
-	.error__vs {
-		display: flex;
-		align-items: center;
-		padding-top: 2.5rem;
-		font-size: 1.4rem;
-		font-weight: 900;
-		color: #374151;
+		gap: 0;
+		padding: 0.5rem 1.25rem 0.75rem;
 		flex-shrink: 0;
 	}
 
-	.error__action {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		background: #1c1c22;
-		border: 1px solid #27272a;
-		border-radius: 12px;
-		padding: 0.65rem 1rem;
-		font-size: 0.78rem;
-		font-weight: 600;
-		color: #94a3b8;
-		width: 100%;
-		justify-content: center;
-	}
-
-	/* ════════════════════════════════════════
-	   SCREEN 4 — SUMMARY
-	════════════════════════════════════════ */
-	.screen--summary {
-		background: #0a0a0f;
-		align-items: center;
-		text-align: center;
-		gap: 0.7rem;
-	}
-
-	.summary__badge {
-		width: 64px;
-		height: 64px;
-		background: #052e16;
-		border: 2px solid #16a34a;
-		border-radius: 50%;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		color: #16a34a;
-		box-shadow: 0 0 0 6px rgba(22,163,74,0.08), 0 0 24px rgba(22,163,74,0.15);
-	}
-
-	.summary__title {
-		margin: 0;
-		font-size: 1.5rem;
-		font-weight: 900;
-		color: #f1f5f9;
-		letter-spacing: -0.03em;
-	}
-	.summary__order {
-		margin: 0;
-		font-size: 0.7rem;
-		font-weight: 600;
-		letter-spacing: 0.08em;
-		color: #4b5563;
-		text-transform: uppercase;
-	}
-
-	.summary__stats {
-		display: grid;
-		grid-template-columns: 1fr 1fr;
-		gap: 0.5rem;
-		width: 100%;
-	}
-	.summary__stat {
-		background: #111116;
-		border: 1px solid #1f1f28;
-		border-radius: 12px;
-		padding: 0.65rem 0.5rem;
+	/* Outcome buttons */
+	.outcome-btn {
 		display: flex;
 		flex-direction: column;
 		align-items: center;
-		gap: 0.15rem;
-	}
-	.summary__stat--accent {
-		border-color: #1a3a1a;
-		background: #0b1f0b;
-	}
-	.summary__stat-value {
-		font-size: 1.4rem;
-		font-weight: 900;
-		color: #f1f5f9;
-		line-height: 1;
-	}
-	.summary__stat--accent .summary__stat-value { color: #22c55e; }
-	.summary__stat-label {
-		font-size: 0.62rem;
-		font-weight: 600;
-		color: #52525b;
-		text-transform: uppercase;
-		letter-spacing: 0.06em;
-	}
-
-	.summary__breakdown {
-		width: 100%;
-		background: #111116;
-		border: 1px solid #1f1f28;
-		border-radius: 12px;
-		overflow: hidden;
-	}
-	.summary__breakdown-row {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: 0.55rem 1rem;
-		font-size: 0.75rem;
-		font-weight: 600;
-		color: #71717a;
-		border-bottom: 1px solid #1f1f28;
-	}
-	.summary__breakdown-row:last-child { border-bottom: none; }
-	.summary__breakdown-good { color: #22c55e; font-size: 1rem; font-weight: 800; }
-	.summary__breakdown-warn { color: #f59e0b; font-size: 1rem; font-weight: 800; }
-
-	.summary__cta {
-		width: 100%;
-		padding: 0.85rem;
-		font-size: 0.95rem;
-		font-weight: 800;
-		color: #fff;
-		background: #2563eb;
+		justify-content: center;
+		gap: 0.375rem;
+		width: 5rem;
+		height: 5.5rem;
 		border: none;
-		border-radius: 14px;
-		cursor: pointer;
+		border-radius: 1.25rem;
+		font-size: 0.6875rem;
+		font-weight: 700;
 		letter-spacing: 0.02em;
-		transition: background 0.15s;
+		text-transform: uppercase;
+		cursor: pointer;
+		touch-action: manipulation;
+		transition: transform 0.12s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease, opacity 0.2s;
+		flex-shrink: 0;
 	}
-	.summary__cta:hover { background: #1d4ed8; }
+
+	.outcome-btn:disabled {
+		opacity: 0.3;
+		cursor: not-allowed;
+		transform: none !important;
+	}
+
+	.outcome-btn:not(:disabled):active {
+		transform: scale(0.93);
+	}
+
+	.outcome-btn--incorrect {
+		background: rgba(220,38,38,0.12);
+		border: 1.5px solid rgba(220,38,38,0.3);
+		color: #fca5a5;
+		box-shadow: 0 4px 20px rgba(220,38,38,0.12);
+	}
+
+	.outcome-btn--incorrect:not(:disabled):hover {
+		background: rgba(220,38,38,0.22);
+		border-color: rgba(220,38,38,0.5);
+		box-shadow: 0 4px 24px rgba(220,38,38,0.28);
+		transform: scale(1.04);
+	}
+
+	.outcome-btn--correct {
+		background: rgba(22,163,74,0.12);
+		border: 1.5px solid rgba(22,163,74,0.3);
+		color: #86efac;
+		box-shadow: 0 4px 20px rgba(22,163,74,0.12);
+	}
+
+	.outcome-btn--correct:not(:disabled):hover {
+		background: rgba(22,163,74,0.22);
+		border-color: rgba(22,163,74,0.5);
+		box-shadow: 0 4px 24px rgba(22,163,74,0.28);
+		transform: scale(1.04);
+	}
+
+	/* Orb */
+	.orb-wrap {
+		flex: 1 1 auto;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 0.625rem;
+	}
+
+	.orb {
+		position: relative;
+		width: 7rem;
+		height: 7rem;
+		border-radius: 50%;
+		background: radial-gradient(circle at 40% 35%, var(--orb-end), var(--orb-start));
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		transition: background 0.5s ease;
+		box-shadow: 0 8px 32px rgba(37,99,235,0.2);
+	}
+
+	.orb--active {
+		animation: orb-breathe 2s ease-in-out infinite;
+		box-shadow: 0 8px 48px rgba(37,99,235,0.35);
+	}
+
+	@keyframes orb-breathe {
+		0%, 100% { transform: scale(1); box-shadow: 0 8px 32px rgba(37,99,235,0.25); }
+		50% { transform: scale(1.05); box-shadow: 0 12px 52px rgba(37,99,235,0.45); }
+	}
+
+	/* Pulse rings */
+	.orb__ring {
+		position: absolute;
+		inset: -6px;
+		border-radius: 50%;
+		border: 1.5px solid rgba(59,130,246,0.35);
+		animation: ring-expand 2s ease-out infinite;
+	}
+
+	.orb__ring--2 {
+		inset: -14px;
+		animation-delay: 0.6s;
+		border-color: rgba(59,130,246,0.18);
+	}
+
+	@keyframes ring-expand {
+		0% { opacity: 1; transform: scale(0.95); }
+		100% { opacity: 0; transform: scale(1.15); }
+	}
+
+	/* Wave inside orb */
+	.orb__wave {
+		display: flex;
+		align-items: center;
+		gap: 2.5px;
+		height: 36px;
+	}
+
+	.orb__bar {
+		display: block;
+		width: 2.5px;
+		background: rgba(255,255,255,0.85);
+		border-radius: 2px;
+		min-height: 3px;
+		transition: height 0.07s ease;
+	}
+
+	/* Thinking dots inside orb */
+	.orb__dots {
+		display: flex;
+		align-items: center;
+		gap: 0.375rem;
+	}
+
+	.orb__dots span {
+		display: block;
+		width: 7px;
+		height: 7px;
+		border-radius: 50%;
+		background: rgba(255,255,255,0.7);
+		animation: bounce-dot 1.1s ease-in-out infinite;
+	}
+
+	.orb__dots span:nth-child(2) { animation-delay: 0.16s; }
+	.orb__dots span:nth-child(3) { animation-delay: 0.32s; }
+
+	@keyframes bounce-dot {
+		0%, 80%, 100% { transform: scale(0.7); opacity: 0.5; }
+		40% { transform: scale(1); opacity: 1; }
+	}
+
+	/* Mic icon inside orb */
+	.orb__icon {
+		color: rgba(255,255,255,0.9);
+	}
+
+	/* Status label below orb */
+	.orb__label {
+		font-size: 0.71875rem;
+		font-weight: 500;
+		color: #475569;
+		letter-spacing: 0.01em;
+		text-align: center;
+		height: 1rem;
+	}
+
+	/* ─── Messages ────────────────────────────────────────────────────────────── */
+	.messages {
+		flex: 1 1 auto;
+		overflow-y: auto;
+		padding: 0.5rem 1.125rem 0.5rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.625rem;
+		border-top: 1px solid rgba(255,255,255,0.04);
+		scroll-behavior: smooth;
+	}
+
+	.messages::-webkit-scrollbar { width: 0.125rem; }
+	.messages::-webkit-scrollbar-track { background: transparent; }
+	.messages::-webkit-scrollbar-thumb {
+		background: rgba(255,255,255,0.08);
+		border-radius: 99px;
+	}
+
+	.msg {
+		display: flex;
+		align-items: flex-end;
+		gap: 0.5rem;
+		max-width: 100%;
+	}
+
+	.msg--user {
+		flex-direction: row-reverse;
+	}
+
+	.msg__avatar {
+		width: 1.625rem;
+		height: 1.625rem;
+		border-radius: 50%;
+		background: linear-gradient(135deg, #1d4ed8, #3b82f6);
+		color: #fff;
+		font-size: 0.5rem;
+		font-weight: 800;
+		letter-spacing: 0.03em;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		flex-shrink: 0;
+	}
+
+	.msg__body {
+		display: flex;
+		flex-direction: column;
+		gap: 0.1875rem;
+		max-width: 78%;
+	}
+
+	.msg--user .msg__body { align-items: flex-end; }
+
+	.msg__text {
+		margin: 0;
+		padding: 0.5625rem 0.875rem;
+		border-radius: 1.125rem;
+		font-size: 0.9rem;
+		line-height: 1.5;
+		word-break: break-word;
+	}
+
+	.msg--ai .msg__text {
+		background: rgba(255,255,255,0.055);
+		border: 1px solid rgba(255,255,255,0.07);
+		color: #cbd5e1;
+		border-bottom-left-radius: 0.25rem;
+	}
+
+	.msg--user .msg__text {
+		background: #1e40af;
+		color: #eff6ff;
+		border-bottom-right-radius: 0.25rem;
+	}
+
+	.msg--correct .msg__text {
+		background: rgba(22,163,74,0.15) !important;
+		border: 1px solid rgba(22,163,74,0.3) !important;
+		color: #bbf7d0 !important;
+		font-weight: 600;
+	}
+
+	.msg--incorrect .msg__text {
+		background: rgba(220,38,38,0.15) !important;
+		border: 1px solid rgba(220,38,38,0.3) !important;
+		color: #fecaca !important;
+		font-weight: 600;
+	}
+
+	.msg__ts {
+		font-size: 0.625rem;
+		color: #334155;
+		letter-spacing: 0.01em;
+	}
+
+	/* Typing dots */
+	.typing-dots {
+		display: flex;
+		align-items: center;
+		gap: 0.3125rem;
+		padding: 0.625rem 0.875rem;
+		background: rgba(255,255,255,0.055);
+		border: 1px solid rgba(255,255,255,0.07);
+		border-radius: 1.125rem;
+		border-bottom-left-radius: 0.25rem;
+	}
+
+	.typing-dots span {
+		display: block;
+		width: 5px;
+		height: 5px;
+		background: #475569;
+		border-radius: 50%;
+		animation: bounce-dot 1.2s ease-in-out infinite;
+	}
+
+	.typing-dots span:nth-child(2) { animation-delay: 0.15s; }
+	.typing-dots span:nth-child(3) { animation-delay: 0.3s; }
+
+	/* ─── Input row ───────────────────────────────────────────────────────────── */
+	.input-row {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.625rem 1rem calc(0.625rem + env(safe-area-inset-bottom, 0px));
+		border-top: 1px solid rgba(255,255,255,0.05);
+		flex-shrink: 0;
+		background: #060b14;
+	}
+
+	.input-row__mute {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 2.5rem;
+		height: 2.5rem;
+		border-radius: 0.75rem;
+		border: 1px solid rgba(255,255,255,0.08);
+		background: rgba(255,255,255,0.04);
+		color: #475569;
+		cursor: pointer;
+		flex-shrink: 0;
+		transition: background 0.15s, color 0.15s, border-color 0.15s;
+	}
+
+	.input-row__mute:hover {
+		background: rgba(255,255,255,0.08);
+		color: #94a3b8;
+	}
+
+	.input-row__mute--off {
+		color: #ef4444;
+		border-color: rgba(239,68,68,0.3);
+		background: rgba(239,68,68,0.08);
+	}
+
+	.input-row__field {
+		flex: 1 1 auto;
+		height: 2.5rem;
+		padding: 0 0.875rem;
+		border-radius: 0.75rem;
+		border: 1px solid rgba(255,255,255,0.08);
+		background: rgba(255,255,255,0.04);
+		color: #e2e8f0;
+		font-size: 0.9rem;
+		outline: none;
+		transition: border-color 0.15s, background 0.15s;
+		font-family: inherit;
+	}
+
+	.input-row__field::placeholder { color: #334155; }
+
+	.input-row__field:focus {
+		border-color: rgba(37,99,235,0.4);
+		background: rgba(37,99,235,0.06);
+	}
+
+	.input-row__field:disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
+	}
+
+	.input-row__send {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 2.5rem;
+		height: 2.5rem;
+		border-radius: 0.75rem;
+		border: none;
+		background: #2563eb;
+		color: #fff;
+		cursor: pointer;
+		flex-shrink: 0;
+		transition: background 0.15s, transform 0.1s, opacity 0.15s;
+	}
+
+	.input-row__send:not(:disabled):hover { background: #1d4ed8; }
+	.input-row__send:not(:disabled):active { transform: scale(0.93); }
+
+	.input-row__send:disabled {
+		opacity: 0.25;
+		cursor: not-allowed;
+	}
 </style>
