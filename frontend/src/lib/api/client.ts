@@ -2,7 +2,11 @@ import { get } from 'svelte/store';
 import { browser } from '$app/environment';
 import { sessionStore, clearSession } from '$lib/stores/session';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
+// In dev, Vite proxies /api/v1 → localhost:8001 (see vite.config.ts).
+// In production (Coolify/nginx), /api/v1 is proxied server-side — no absolute
+// URL needed. Defaulting to the relative path makes the deployed bundle work
+// without a VITE_API_BASE_URL build arg.
+const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api/v1';
 
 export class ApiError extends Error {
 	status: number;
@@ -613,6 +617,161 @@ export async function getEstanteQRPrintSheet(
 		`/estantes/${estanteId}/qrs/print?per_page=${perPage}`,
 		'application/pdf'
 	);
+
+	if (!response.ok) {
+		const { message, body } = await extractBlobError(response);
+		throw new ApiError(message, response.status, body);
+	}
+
+	return response.blob();
+}
+
+// ---------------------------------------------------------------------------
+// Picking / InvenTIA domain
+// ---------------------------------------------------------------------------
+
+export type PickingOutcome =
+	| 'ancla'
+	| 'correcto'
+	| 'fuera_de_orden'
+	| 'ya_pickeado'
+	| 'no_en_remito'
+	| 'codigo_invalido';
+
+export type OutcomeColor = 'green' | 'amber' | 'red';
+
+export interface RemitoListItem {
+	remito_id: number;
+	referencia: string;
+	estado: 'ready' | 'in_progress' | 'completed';
+	es_demo: boolean;
+	total_lineas: number;
+	lineas_completas: number;
+	created_at: string;
+}
+
+export interface RemitoItemState {
+	remito_item_id: number;
+	sku: string;
+	descripcion: string;
+	cantidad_pedida: number;
+	cantidad_pickeada: number;
+	completado: boolean;
+	ubicacion_qr: string;
+	ubicacion_hablada: string;
+}
+
+export interface RouteStop {
+	orden: number;
+	remito_item_id: number;
+	sku: string;
+	descripcion: string;
+	cantidad_pedida: number;
+	cantidad_pickeada: number;
+	ubicacion_qr: string;
+	ubicacion_hablada: string;
+	es_siguiente: boolean;
+}
+
+export interface RoutePlan {
+	paradas: RouteStop[];
+	distancia_total: number;
+	algoritmo: string;
+	provisional: boolean;
+}
+
+export interface RemitoState {
+	remito_id: number;
+	referencia: string;
+	estado: 'ready' | 'in_progress' | 'completed';
+	route_version: number;
+	anchor_ubicacion_qr: string | null;
+	anchor_ubicacion_hablada: string | null;
+	items: RemitoItemState[];
+	ruta: RoutePlan | null;
+	lineas_completas: number;
+	total_lineas: number;
+}
+
+export interface ScanResponse {
+	event_id: number;
+	client_event_id: string;
+	outcome: PickingOutcome;
+	accepted: boolean;
+	color: OutcomeColor;
+	display_text: string;
+	speech_text: string;
+	speech_cache_key: string;
+	matched_sku: string | null;
+	matched_descripcion: string | null;
+	state: RemitoState;
+}
+
+export interface AskResponse {
+	respuesta: string;
+	fuente: 'n8n' | 'fallback';
+}
+
+export async function listPickingRemitos(): Promise<RemitoListItem[]> {
+	return api<RemitoListItem[]>('/picking/remitos');
+}
+
+export async function getPickingRemito(remitoId: number): Promise<RemitoState> {
+	return api<RemitoState>(`/picking/remitos/${remitoId}`);
+}
+
+export async function startPickingRemito(remitoId: number): Promise<RemitoState> {
+	return api<RemitoState>(`/picking/remitos/${remitoId}/start`, { method: 'POST' });
+}
+
+export async function scanPickingCode(
+	remitoId: number,
+	rawCode: string,
+	clientEventId: string
+): Promise<ScanResponse> {
+	return api<ScanResponse>(`/picking/remitos/${remitoId}/scan`, {
+		method: 'POST',
+		body: JSON.stringify({ raw_code: rawCode, client_event_id: clientEventId })
+	});
+}
+
+export async function finishPickingRemito(remitoId: number): Promise<{ ok: boolean }> {
+	return api<{ ok: boolean }>(`/picking/remitos/${remitoId}/finish`, { method: 'POST' });
+}
+
+export async function resetPickingRemito(remitoId: number): Promise<RemitoState> {
+	return api<RemitoState>(`/picking/remitos/${remitoId}/reset`, { method: 'POST' });
+}
+
+export async function askPickingAssistant(
+	remitoId: number,
+	pregunta: string
+): Promise<AskResponse> {
+	return api<AskResponse>(`/picking/remitos/${remitoId}/ask`, {
+		method: 'POST',
+		body: JSON.stringify({ pregunta })
+	});
+}
+
+export async function getTtsAudio(text: string): Promise<Blob> {
+	const session = get(sessionStore);
+	const headers: Record<string, string> = {
+		'Content-Type': 'application/json',
+		Accept: 'audio/mpeg'
+	};
+	if (session?.token) headers['Authorization'] = `Bearer ${session.token}`;
+
+	const response = await fetch(`${API_BASE}/tts`, {
+		method: 'POST',
+		headers,
+		body: JSON.stringify({ text })
+	});
+
+	if (response.status === 401) {
+		clearSession();
+		if (browser) window.location.href = '/login';
+		throw new Error('Sesión inválida o expirada');
+	}
 
 	if (!response.ok) {
 		const { message, body } = await extractBlobError(response);

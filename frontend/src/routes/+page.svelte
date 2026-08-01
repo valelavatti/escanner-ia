@@ -9,6 +9,7 @@
 	{#if $sessionStore}
 		<p>Hola, {$sessionStore.usuario.nombre}</p>
 		<div class="home__actions">
+			<a href="/picking" class="home__action home__action--picking">Modo Remito (InvenTIA)</a>
 			<a href="/scanner" class="home__action">Escanear</a>
 			<a href="/mapa" class="home__action home__action--secondary">Ver mapa</a>
 			<a href="/historial" class="home__action home__action--secondary">Historial</a>
@@ -65,6 +66,16 @@
 
 	.home__action--secondary:active {
 		background-color: #e2e8f0;
+	}
+
+	.home__action--picking {
+		color: #ffffff;
+		background-color: #16a34a;
+		font-size: 1.0625rem;
+	}
+
+	.home__action--picking:active {
+		background-color: #15803d;
 	}
 
 	.home__action--admin {
